@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { prisma } from "..";
 import { DepositDTO, TransactionDTO } from "../../types/transactionTypes";
+import { Category } from "@prisma/client";
 
 type RequestBody<T> = Request<{}, {}, T>;
 
@@ -79,7 +80,7 @@ export const saveDeposit = async ({ body }: RequestBody<DepositDTO>, res: Respon
     const newTransaction = await prisma.transaction.create({
       data: {
         amount: body.compostReport.depositWeight,
-        category: 'MISC',
+        category: Category.DEPOSIT,
         purchaserId: process.env.LIRA_SHAPIRA_USER_ID,
         recipientId: body.userId,
         reason: 'Deposit',

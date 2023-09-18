@@ -43,6 +43,7 @@ model Transaction {
 enum Category {
   GROCERIES
   MISC
+  DEPOSIT
   GARDEN
   GIFT
 }
