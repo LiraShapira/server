@@ -13,6 +13,7 @@ This is the backend for the new Lira Shapira App, a local eco-currency. Earn by 
 contributions welcome! 😊 
 To start work on the app:
 - fork & clone the repo.
+- create .env with local environment variables
 - run `npm i`
-- from the root of server repo, run `npm run devstart` (you will need a running postgres server)
+- from the root of server repo, run `npm run devstart`
 

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "..";
-import { DepositDTO, TransactionDTO } from "../../types/transactionTypes";
+import { DepositDTO, TransactionDTO, TransactionWithUsers } from "../../types/transactionTypes";
 import { Category } from "@prisma/client";
 
 type RequestBody<T> = Request<{}, {}, T>;
@@ -34,7 +34,21 @@ export const saveNewTransaction = async (req: RequestBody<TransactionDTO>, res: 
     const recipientId = await findUserIdByPhoneNumber(transaction.recipientPhoneNumber);
 
     // TODO check balance is adequate for transaction
-    const transactionDBResponse = await prisma.transaction.create({
+    await prisma.user.update({
+      where: {
+        id: recipientId
+      },
+      data: { accountBalance: { increment: transaction.amount } },
+    })
+
+    await prisma.user.update({
+      where: {
+        id: transaction.purchaserId
+      },
+      data: { accountBalance: { decrement: transaction.amount } },
+    })
+
+    const transactionWithUsers: TransactionWithUsers = await prisma.transaction.create({
       data: {
         category: transaction.category,
         amount: transaction.amount,
@@ -50,21 +64,8 @@ export const saveNewTransaction = async (req: RequestBody<TransactionDTO>, res: 
       }
     })
 
-    await prisma.user.update({
-      where: {
-        id: recipientId
-      },
-      data: { accountBalance: { increment: transaction.amount } },
-    })
 
-    await prisma.user.update({
-      where: {
-        id: transaction.purchaserId
-      },
-      data: { accountBalance: { decrement: transaction.amount } },
-    })
-
-    res.status(201).json(transactionDBResponse);
+    res.status(201).json(transactionWithUsers);
   } catch (e: any) {
     console.log(e)
     res.status(400).json({ error: e.message })
