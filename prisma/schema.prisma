@@ -70,7 +70,8 @@ model CompostStand {
 }
 
 model CompostReport {
-  compostStandId   Int               @unique
+  compostStandId   Int
+  compostReportId  String            @id @default(uuid())
   compostStand     CompostStand      @relation(fields: [compostStandId], references: [CompostStandId])
   depositWeight    Decimal
   compostSmell     Boolean?
