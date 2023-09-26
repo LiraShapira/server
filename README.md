@@ -1,4 +1,5 @@
-# Lira Shapira Server 
+# Lira Shapira Server
+
 This is the backend for the new Lira Shapira App, a local eco-currency. Earn by donating organic waste to your local compost project!
 
  <p align='center'>
@@ -6,14 +7,17 @@ This is the backend for the new Lira Shapira App, a local eco-currency. Earn by 
   </p>
 
 ## More Info
+
 - [frontend](https://github.com/LiraShapira/app)
 - [Our site](https://lirashapira.org/)
 
 ## Join us!
-contributions welcome! 😊 
+
+contributions welcome! 😊
 To start work on the app:
+
 - fork & clone the repo.
 - create .env with local environment variables
 - run `npm i`
 - from the root of server repo, run `npm run devstart`
-
+- to make deposits, create a user in your db for the lira shapira organisation and add this user's id to the .env variables

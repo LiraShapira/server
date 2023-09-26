@@ -107,8 +107,8 @@ export const saveDeposit = async ({ body }: RequestBody<DepositDTO>, res: Respon
     })
 
     res.status(201).send(newTransaction);
-  } catch (e) {
+  } catch (e: any) {
     console.log(e)
-    res.status(400).send(e)
+    res.status(400).json({ error: e.message })
   }
 }
