@@ -25,6 +25,7 @@ model User {
   phoneNumber             String          @unique
   adminCompostStand       CompostStand?   @relation(fields: [adminCompostStandId], references: [compostStandId], name: "StandAdmins")
   adminCompostStandId     Int?
+  Attendee                Attendee[]
 
   // index by email for sorting and querying
   @@index([phoneNumber])
@@ -88,4 +89,41 @@ model CompostReport {
   date             DateTime          @default(now())
   user             User              @relation(fields: [userId], references: [id])
   userId           String
+}
+
+enum AttendeeRole {
+  seller
+  attendee
+  volunteer
+}
+
+model Attendee {
+  user            User         @relation(fields: [userId], references: [id])
+  userId          String       @id
+  role            AttendeeRole
+  eventId         String
+  event           Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  productsForSale String[]
+}
+
+model Location {
+  id      String  @id @default(uuid())
+  name    String?
+  lat     Float?
+  long    Float?
+  address String?
+  link    String?
+  Event   Event[]
+  eventId String?
+}
+
+model Event {
+  id          String     @id @default(uuid())
+  startDate   DateTime
+  endDate     DateTime
+  title       String
+  description String
+  attendees   Attendee[] @relation(fields: [], references: [])
+  location    Location   @relation(fields: [locationId], references: [id])
+  locationId  String
 }
