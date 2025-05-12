@@ -64,19 +64,9 @@ export const getUser = async (
       include: {
         transactions: {
           include: {
-            users: {
-              select: {
-                firstName: true,
-                lastName: true
-              },
-              where: {
-                NOT: {
-                  phoneNumber
-                }
-              }
-            }
+            users: true
           }
-        }
+        },
       },
     });
     if (!user) {

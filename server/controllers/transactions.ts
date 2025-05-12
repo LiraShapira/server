@@ -5,7 +5,7 @@ import {
   TransactionDTO,
 } from '../../types/transactionTypes';
 import { Category, Transaction } from '@prisma/client';
-import { convertdepositDTOToCompostReportData, findUserIdByPhoneNumber } from '../utils';
+import { convertDepositDTOToCompostReportData, findUserIdByPhoneNumber } from '../utils';
 import { standsNameToIdMap } from '../../constants/compostStands';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -44,10 +44,6 @@ export const saveNewTransaction = async (
         },
         include: {
           users: {
-            select: {
-              firstName: true,
-              lastName: true
-            },
             where: {
               id: transaction.isRequest ? transaction.purchaserId : recipientId
             }
@@ -86,86 +82,115 @@ export const saveDeposit = async (
   { body }: RequestBody<DepositDTO>,
   res: Response
 ) => {
-
   // TODO ROUND TO 1dp
   const netGained = body.compostReport.depositWeight * 0.9;
   const tenPercent = body.compostReport.depositWeight * 0.1;
   const compostStandId = standsNameToIdMap[body.compostReport.compostStand];
 
   try {
-    if (!process.env.LIRA_SHAPIRA_USER_ID) {
+    const orgId = process.env.LIRA_SHAPIRA_USER_ID;
+    if (!orgId) {
       throw new Error('no lira shapira user id available');
     }
-    const newTransaction = await prisma.transaction.create({
+
+    // create main transaction for depositor (org as purchaser)
+    const mainTransaction = await prisma.transaction.create({
       data: {
         amount: netGained,
         category: Category.DEPOSIT,
-        purchaserId: process.env.LIRA_SHAPIRA_USER_ID,
+        purchaserId: orgId,
         recipientId: body.userId,
         reason: 'Deposit',
         users: {
           connect: [
-            { id: process.env.LIRA_SHAPIRA_USER_ID },
+            { id: orgId },
             { id: body.userId },
           ],
         },
       },
       include: {
-        users: {
-          select: {
-            firstName: true,
-            lastName: true
-          },
-          where: {
-            id: process.env.LIRA_SHAPIRA_USER_ID
-          }
-        },
+        users: true
       },
     });
 
-    const compostStandAdmins = await prisma.compostStand.findUnique({
-      where: {
-        compostStandId: compostStandId
-      },
-      select: {
-        admins: true
+    const responseTransactions: Array<typeof mainTransaction & { amount: Decimal; users: Array<{ firstName: string; lastName: string }> }> = [];
+
+    // helper to duplicate single user entry when purchaser === recipient
+    const normalizeUsers = (tx: typeof mainTransaction) => {
+      const list = [...tx.users];
+      if (tx.purchaserId === tx.recipientId) {
+        // duplicate so both slots appear
+        list.push({ ...list[0] });
       }
+      return list;
+    };
+
+    // push main txn (no self-tip here, purchaser always org)
+    responseTransactions.push({
+      ...mainTransaction,
+      users: normalizeUsers(mainTransaction),
+      amount: new Decimal(netGained),
     });
 
-    const numberOfAdmins = compostStandAdmins?.admins.length;
-    if (numberOfAdmins) {
-      const bonus = tenPercent / numberOfAdmins;
-      compostStandAdmins.admins.forEach(async admin => {
-        // update user balance
+    // fetch stand admins
+    const stand = await prisma.compostStand.findUnique({
+      where: { compostStandId },
+      select: { admins: true },
+    });
+
+    if (stand?.admins?.length) {
+      const share = tenPercent / stand.admins.length;
+
+      for (const admin of stand.admins) {
+        // distribute bonus to admin balance
         await prisma.user.update({
-          where: {
-            id: admin.id,
-          },
-          data: { accountBalance: { increment: bonus } },
+          where: { id: admin.id },
+          data: { accountBalance: { increment: share } },
         });
-      });
+
+        // record admin transaction (user as purchaser)
+        const adminTransaction = await prisma.transaction.create({
+          data: {
+            amount: share,
+            category: Category.DEPOSIT,
+            purchaserId: body.userId,
+            recipientId: admin.id,
+            reason: 'StandAdminPayment',
+            users: {
+              connect: [
+                { id: body.userId },
+                { id: admin.id },
+              ],
+            },
+          },
+          include: {
+            users: true,
+          },
+        });
+
+        responseTransactions.push({
+          ...adminTransaction,
+          users: normalizeUsers(adminTransaction),
+          amount: new Decimal(share),
+        });
+      }
     }
 
-    // update user balance
+    // finalize depositor balance update and report logging
     await prisma.user.update({
-      where: {
-        id: body.userId,
-      },
+      where: { id: body.userId },
       data: { accountBalance: { increment: netGained } },
     });
+    await prisma.compostReport.create({ data: convertDepositDTOToCompostReportData(body) });
 
-
-    // save report to stand and reports
-    await prisma.compostReport.create({
-      data: convertdepositDTOToCompostReportData(body)
-    });
-
-    res.status(201).send({ ...newTransaction, amount: new Decimal(netGained) });
+    // respond with one or two txns
+    res.status(201).send(responseTransactions);
   } catch (e) {
-    console.log(e);
+    console.error(e);
     res.status(400).send(e);
   }
 };
+
 
 export const handleRequest = async (
   { body }: RequestBody<HandleRequestDTO>,
@@ -293,3 +318,19 @@ export const transactionStats = async (req: Request, res: Response) => {
   }
 };
 
+export const deleteTransaction = async (
+  req: Request<{ id: string }>,
+  res: Response
+) => {
+  const transactionId = req.params.id;
+  try {
+    const transaction = await prisma.transaction.delete({
+      where: {
+        id: transactionId
+      }
+    });
+    res.status(200).send(transaction);
+  } catch (e) {
+    res.status(400).send(e);
+  }
+}
