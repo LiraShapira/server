@@ -16,6 +16,8 @@ import {
   setUsersLocalStand,
   compostStandStats,
   monthlyCompostStandStats,
+  getCompostReports,
+  getCompostReportsStats,
 } from './controllers/compostStands';
 import {
   getAllTransactions,
@@ -50,6 +52,10 @@ router.get('/transactions', getAllTransactions);
 router.post('/saveTransaction', saveNewTransaction);
 router.post('/deposit', saveDeposit);
 router.put('/handleRequest', handleRequest);
+
+// COMPOST REPORTS 
+router.get("/getCompostReports", getCompostReports);
+
 // TWILIO
 router.post('/startVerify', startVerify);
 router.post('/checkVerify', checkVerify);
@@ -68,6 +74,9 @@ router.post('/updateEvent', updateEvent);
 router.get('/userStats', userStats)
 router.get('/transactionStats', transactionStats)
 router.get('/compostStandStats', compostStandStats)
+router.get("/compostReportStats", getCompostReportsStats);
+
+
 router.get('/monthlyCompostStandStats', monthlyCompostStandStats)
 
 export default router;

@@ -83,6 +83,24 @@ export async function setUsersLocalStand(
   }
 }
 
+export async function getCompostReports(req: Request, res: Response) {
+
+
+  try {
+    const reports = await prisma.compostReport.findMany({
+      include: {
+        compostStand: true,
+        user: true,
+      },
+    });
+    res.status(200).send(reports);
+  } catch (e) {
+    console.log(e);
+    res.send(400);
+  }
+}
+
+
 // ____________________CLEANUP____________________CLEANUP____________________CLEANUP____________________
 
 export async function deleteAllCompostStands(_req: Request, res: Response) {
@@ -192,4 +210,64 @@ export const compostStandStats = async (req: Request, res: Response) => {
   } catch (e: any) {
     res.status(400).send({ error: e.message });
   }
+};
+
+
+export const getCompostReportsStats = async (req: Request, res: Response) => {
+  let period = 30;
+  if (req.query.period && typeof req.query.period === 'string') {
+    period = parseInt(req.query.period, 10);
+  }
+
+  const now = new Date();
+  const from = new Date(now);
+  from.setDate(now.getDate() - period);
+
+  // Fetch all reports in period, including stand info
+  const reports = await prisma.compostReport.findMany({
+    where: { date: { gte: from, lte: now } },
+    include: { compostStand: true },
+  });
+
+  // Aggregate per stand
+  const statsMap: Record<string, any> = {};
+  for (const rpt of reports) {
+    const sid = rpt.compostStandId;
+    const standName = rpt.compostStand.name;
+    if (!statsMap[sid]) {
+      statsMap[sid] = {
+        compostStandId: sid,
+        standName,
+        total: 0,
+        compostSmell: { yes: 0, some: 0, no: 0, missing: 0 },
+        dryMatterPresent: { yes: 0, some: 0, no: 0, missing: 0 },
+        cleanAndTidy: { true: 0, false: 0, missing: 0 },
+        full: { true: 0, false: 0, missing: 0 },
+        scalesProblem: { true: 0, false: 0, missing: 0 },
+        bugs: { true: 0, false: 0, missing: 0 },
+        notes: { with: 0, without: 0 },
+      };
+    }
+    const s = statsMap[sid];
+    s.total++;
+
+    // dryMatterPresent (enum)
+    if (!rpt.dryMatterPresent) s.dryMatterPresent.missing++;
+    else s.dryMatterPresent[rpt.dryMatterPresent]++;
+
+    // boolean fields
+    for (const prop of ['cleanAndTidy', 'full', 'scalesProblem', 'bugs', 'compostSmell'] as const) {
+      const val = (rpt as any)[prop];
+      if (val === null || val === undefined) s[prop].missing++;
+      else s[prop][String(val)]++;
+    }
+
+    // notes
+    if (rpt.notes && rpt.notes.trim().length > 0) s.notes.with++;
+    else s.notes.without++;
+  }
+
+  // Convert map to array
+  const stats = Object.values(statsMap);
+  res.status(200).json(stats);
 };
