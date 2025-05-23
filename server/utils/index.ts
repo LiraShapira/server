@@ -21,26 +21,17 @@ export const convertUserWithTransactionsCountToCountArray = (userWithTransaction
     return userWithTransactionsCount.map(n => n._count.transactions);
 }
 
-export const convertdepositDTOToCompostReportData = (depositDTO: DepositDTO): Prisma.CompostReportUncheckedCreateInput => {
+export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): Prisma.CompostReportUncheckedCreateInput => {
     const { compostReport, userId } = depositDTO;
+    const { compostStand, ...restCompostReport } = compostReport;
 
-    const compostSmell = compostReport?.compostSmell;
-    // TODO legacy yes/no option remove on frontend update
-    const compostSmellBoolean = compostSmell && typeof compostSmell === 'boolean' ? compostSmell : compostSmell === 'yes'; 
-
-    
     return {
+        ...restCompostReport,
+        dryMatterPresent: compostReport.dryMatter === undefined ? undefined : compostReport.dryMatter ? 'yes' : 'no',
         depositWeight: new Prisma.Decimal(compostReport.depositWeight),
-        dryMatterPresent: compostReport.dryMatter,
-        notes: compostReport.notes,
-        compostStandId: standsNameToIdMap[compostReport.compostStand],
-        bugs: compostReport.bugs,
-        full: compostReport.full,
-        scalesProblem: compostReport.scalesProblem,
-        cleanAndTidy: compostReport.cleanAndTidy,
-        compostSmell: compostSmellBoolean,
+        compostStandId: standsNameToIdMap[compostStand],
         userId
-      };      
+    };
 }
 
-export const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+export const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

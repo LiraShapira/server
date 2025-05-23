@@ -2,22 +2,21 @@ import { DRYMATTERPRESENT, Transaction, User } from "@prisma/client";
 import { CompostStandName } from "../constants/compostStands";
 
 export type TransactionDTO = Pick<Transaction, 'category' | 'amount' | 'purchaserId' | 'reason' | 'isRequest'> & {
-    recipientPhoneNumber: string;
+  recipientPhoneNumber: string;
 };
 
 export interface DepositDTO {
   userId: string;
   compostReport: {
     depositWeight: number;
-    dryMatter?: DRYMATTERPRESENT,
+    dryMatter?: boolean,
     notes?: string;
     compostStand: CompostStandName
     bugs?: boolean;
     scalesProblem?: boolean;
     full?: boolean;
     cleanAndTidy?: boolean;
-    // TODO yes/no is legacy
-    compostSmell?: 'yes' | 'no' | boolean;
+    compostSmell?: boolean;
   }
 }
 
