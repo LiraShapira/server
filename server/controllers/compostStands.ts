@@ -240,20 +240,24 @@ export const getCompostReportsStats = async (req: Request, res: Response) => {
         standName,
         total: 0,
         compostSmell: { true: 0, false: 0, missing: 0 },
-        dryMatterPresent: { yes: 0, some: 0, no: 0, missing: 0 },
         cleanAndTidy: { true: 0, false: 0, missing: 0 },
         full: { true: 0, false: 0, missing: 0 },
         scalesProblem: { true: 0, false: 0, missing: 0 },
         bugs: { true: 0, false: 0, missing: 0 },
         notes: { with: 0, without: 0 },
+        dryMatterPresent: { true: 0, false: 0, missing: 0 }
       };
     }
     const s = statsMap[sid];
     s.total++;
 
-    // dryMatterPresent (enum)
-    if (!rpt.dryMatterPresent) s.dryMatterPresent.missing++;
-    else s.dryMatterPresent[rpt.dryMatterPresent]++;
+    if (rpt.dryMatterPresent === null || rpt.dryMatterPresent === undefined) {
+      s.dryMatterPresent.missing++;
+    } else if (rpt.dryMatterPresent == 'yes') {
+      s.dryMatterPresent.true++;
+    } else if (rpt.dryMatterPresent == 'no') {
+      s.dryMatterPresent.false++;
+    }
 
     // boolean fields
     for (const prop of ['cleanAndTidy', 'full', 'scalesProblem', 'bugs', 'compostSmell'] as const) {
