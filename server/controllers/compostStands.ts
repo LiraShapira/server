@@ -239,7 +239,7 @@ export const getCompostReportsStats = async (req: Request, res: Response) => {
         compostStandId: sid,
         standName,
         total: 0,
-        compostSmell: { yes: 0, some: 0, no: 0, missing: 0 },
+        compostSmell: { true: 0, false: 0, missing: 0 },
         dryMatterPresent: { yes: 0, some: 0, no: 0, missing: 0 },
         cleanAndTidy: { true: 0, false: 0, missing: 0 },
         full: { true: 0, false: 0, missing: 0 },

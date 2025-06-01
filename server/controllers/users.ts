@@ -189,7 +189,7 @@ export const userStats = async (
       },
     })
     const balanceCounts = rawBalanceCounts
-      .map(b => ({ count: b._count._all, balance: b. accountBalance.toNumber() }))
+      .map(b => ({ count: b._count._all, balance: b.accountBalance.toNumber() }))
       .sort((a, b) => b.balance > a.balance ? -1 : 1)
 
     // max age of 12 hours
@@ -216,17 +216,25 @@ export const deleteAllusers = async (_req: Request, res: Response) => {
 };
 
 export const deleteUserByPhoneNumber = async (
-  req: Request<phoneNumberReqObject>,
+  req: Request,
   res: Response
 ) => {
-  const { phoneNumber } = req.body;
+  const phoneNumber: string = req.params.number;
   try {
     const id = await findUserIdByPhoneNumber(phoneNumber);
+
     await prisma.compostReport.deleteMany({
       where: {
         userId: id,
       },
     });
+
+    await prisma.attendee.deleteMany({
+      where: {
+        userId: id,
+      },
+    });
+
     const deletedUser = await prisma.user.delete({
       where: {
         id,
