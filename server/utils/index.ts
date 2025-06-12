@@ -1,4 +1,4 @@
-import { CompostReport, Prisma } from "@prisma/client";
+import { $Enums, Prisma } from "@prisma/client";
 import { prisma } from "..";
 import { UserWithTransactionsCount } from "../../types/userTypes";
 import { DepositDTO } from "../../types/transactionTypes";
@@ -27,7 +27,7 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): Pr
 
     return {
         ...restCompostReport,
-        dryMatterPresent: compostReport.dryMatter === undefined ? undefined : compostReport.dryMatter ? 'yes' : 'no',
+        dryMatterPresent: compostReport.dryMatter === undefined ? undefined : compostReport.dryMatter ? $Enums.DRYMATTERPRESENT.yes : $Enums.DRYMATTERPRESENT.no,
         depositWeight: new Prisma.Decimal(compostReport.depositWeight),
         compostStandId: standsNameToIdMap[compostStand],
         userId
