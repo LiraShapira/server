@@ -82,8 +82,7 @@ export const saveDeposit = async (
   { body }: RequestBody<DepositDTO>,
   res: Response
 ) => {
-  // TODO ROUND TO 1dp
-  const netGained = body.compostReport.depositWeight * 0.9;
+  const netGained = body.compostReport.depositWeight;
   const tenPercent = body.compostReport.depositWeight * 0.1;
   const compostStandId = standsNameToIdMap[body.compostReport.compostStand];
 
