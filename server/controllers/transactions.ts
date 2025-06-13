@@ -141,6 +141,9 @@ export const saveDeposit = async (
       const share = tenPercent / stand.admins.length;
 
       for (const admin of stand.admins) {
+        if (admin.id === body.userId) {
+          continue
+        }
         // distribute bonus to admin balance
         await prisma.user.update({
           where: { id: admin.id },
