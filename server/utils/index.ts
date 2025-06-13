@@ -23,15 +23,31 @@ export const convertUserWithTransactionsCountToCountArray = (userWithTransaction
 
 export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): Prisma.CompostReportUncheckedCreateInput => {
     const { compostReport, userId } = depositDTO;
-    const { compostStand, ...restCompostReport } = compostReport;
+    const {
+        compostStand,
+        depositWeight,
+        dryMatter,
+        notes,
+        bugs,
+        scalesProblem,
+        full,
+        cleanAndTidy,
+        compostSmell,
+    } = compostReport;
 
     return {
-        ...restCompostReport,
-        dryMatterPresent: compostReport.dryMatter === undefined ? undefined : compostReport.dryMatter ? $Enums.DRYMATTERPRESENT.yes : $Enums.DRYMATTERPRESENT.no,
-        depositWeight: new Prisma.Decimal(compostReport.depositWeight),
+        depositWeight: new Prisma.Decimal(depositWeight),
+        dryMatterPresent:
+            dryMatter === undefined ? undefined : dryMatter ? "yes" : "no",
+        notes,
+        bugs,
+        scalesProblem,
+        full,
+        cleanAndTidy,
+        compostSmell,
         compostStandId: standsNameToIdMap[compostStand],
-        userId
+        userId,
     };
-}
+};
 
 export const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
