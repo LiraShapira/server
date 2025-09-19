@@ -3,19 +3,30 @@ import { standsIdToNameMap } from '../constants/compostStands';
 const prisma = new PrismaClient()
 async function main() {
     try {
-        const compostStands: CompostStand[] = Object.entries(standsIdToNameMap).map(([key, val]) => ({
-            name: val,
-            compostStandId: parseInt(key)
-        }))
-        await prisma.compostStand.createMany({
-            data: compostStands
-        });
+        // Create compost stands using upsert to handle existing records
+        for (const [key, val] of Object.entries(standsIdToNameMap)) {
+            await prisma.compostStand.upsert({
+                where: {
+                    compostStandId: parseInt(key)
+                },
+                update: {
+                    name: val
+                },
+                create: {
+                    name: val,
+                    compostStandId: parseInt(key)
+                }
+            });
+        }
 
         const liraShapira = await prisma.user.upsert({
             where: {
-                id: process.env.LIRA_SHAPIRA_USER_ID
+                phoneNumber: '000'
             },
-            update: {},
+            update: {
+                lastName: 'SHAPIRA',
+                firstName: 'LIRA'
+            },
             create: {
                 lastName: 'SHAPIRA',
                 firstName: 'LIRA',
