@@ -29,9 +29,14 @@ import {
 import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin } from './controllers/compostStandAdmins';
 import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
 import { checkVerify, startVerify } from './controllers/twilio';
-import { checkDatabaseHealth } from './index';
+import { checkDatabaseHealth } from './utils/healthCheck';
 
 const router = Router();
+
+// Simple test endpoint
+router.get('/test', (req, res) => {
+  res.json({ message: 'Test endpoint working', timestamp: new Date().toISOString() });
+});
 
 // Health check endpoint
 router.get('/health', async (req, res) => {

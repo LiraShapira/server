@@ -41,16 +41,7 @@ async function connectWithRetry() {
 // Initial connection
 connectWithRetry();
 
-// Health check function
-export async function checkDatabaseHealth() {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    return true;
-  } catch (error) {
-    console.error('Database health check failed:', error);
-    return false;
-  }
-}
+// Health check function moved to utils/healthCheck.ts to avoid circular imports
 
 // Periodic health check and reconnection
 setInterval(async () => {
@@ -58,8 +49,9 @@ setInterval(async () => {
     console.log('Attempting to reconnect to database...');
     await connectWithRetry();
   } else {
-    const isHealthy = await checkDatabaseHealth();
-    if (!isHealthy) {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch (error) {
       console.log('Database health check failed, marking as disconnected');
       isConnected = false;
     }
