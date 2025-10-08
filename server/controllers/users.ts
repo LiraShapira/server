@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { phoneNumberReqObject, userReqObject } from '../../types/userTypes';
-import { prisma } from '../index';
+import { supabase } from '../config/supabase';
 import { Category } from '@prisma/client';
 import { ErrorRes } from '../../types/commonTypes';
 import {
@@ -12,33 +12,48 @@ type RequestBody<T> = Request<{}, {}, T>;
 
 export const getAllUsers = async (_req: Request, res: Response) => {
   try {
-    const users = await prisma.user.findMany({
-      include: {
-        transactions: true,
-      },
-    });
-    res.json(users);
-  } catch (error: any) {
-    console.error('Error in getAllUsers:', error);
-    if (error.code === 'P1001') {
-      // Database connection error
-      res.status(503).json({ 
-        error: 'Database connection lost. Please try again.',
-        code: 'DB_CONNECTION_ERROR'
-      });
-    } else {
-      res.status(500).json({ 
+    const { data: users, error } = await supabase
+      .from('User')
+      .select(`
+        *,
+        transactions:Transaction(*)
+      `);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ 
         error: 'Failed to fetch users',
         message: error.message 
       });
     }
+
+    res.json(users);
+  } catch (error: any) {
+    console.error('Error in getAllUsers:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch users',
+      message: error.message 
+    });
   }
 };
 
 export const getUserByNumber = async (req: Request<{ phoneNumber: string }>, res: Response) => {
   try {
-    const userId = await findUserIdByPhoneNumber(req.body.phoneNumber);
-    res.status(200).send({ userId });
+    const { data: user, error } = await supabase
+      .from('User')
+      .select('id')
+      .eq('phoneNumber', req.body.phoneNumber)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(400).json({ error: 'User not found' });
+      }
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(200).send({ userId: user.id });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
@@ -49,18 +64,27 @@ export const saveNewUser = async (
   res: Response
 ) => {
   const { firstName, lastName, phoneNumber, email } = req.body;
+  
   try {
-    const user = await prisma.user.create({
-      data: {
-        phoneNumber,
+    const { data: user, error } = await supabase
+      .from('User')
+      .insert({
         firstName,
         lastName,
+        phoneNumber,
         ...(email && { email }),
-      },
-      include: {
-        transactions: true,
-      },
-    });
+      })
+      .select(`
+        *,
+        transactions:Transaction(*)
+      `)
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
     res.status(200).send(user);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -72,22 +96,28 @@ export const getUser = async (
   res: Response
 ) => {
   const { phoneNumber } = req.body;
+  
   try {
-    let user = await prisma.user.findUnique({
-      where: {
-        phoneNumber: phoneNumber,
-      },
-      include: {
-        transactions: {
-          include: {
-            users: true
-          }
-        },
-      },
-    });
-    if (!user) {
-      throw new Error('User not found');
+    const { data: user, error } = await supabase
+      .from('User')
+      .select(`
+        *,
+        transactions:Transaction(
+          *,
+          users:User(*)
+        )
+      `)
+      .eq('phoneNumber', phoneNumber)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(400).json({ error: 'User not found' });
+      }
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
     }
+
     res.status(200).send(user);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -116,148 +146,20 @@ export const userStats = async (
   req: Request<{ period?: string }>,
   res: Response<userStatsRes | ErrorRes>
 ) => {
-  let period = 30;
-  if (req.query.period && typeof req.query.period === 'string') {
-    period = parseInt(req.query.period);
-  }
-
-  const today = new Date();
-  const rangeDate = new Date(new Date().setDate(new Date().getDate() - period));
-  const dateQuery = {
-    lte: today,
-    gte: rangeDate,
-  };
-
-  try {
-    const userCount = await prisma.user.count() - 1;
-
-    const newUserCount = await prisma.user.count({
-      where: {
-        createdAt: dateQuery,
-        NOT: {
-          id: process.env.LIRA_SHAPIRA_USER_ID
-        }
-      },
-    });
-
-
-    const users = await prisma.user.findMany({
-      where: {
-        NOT: {
-          id: process.env.LIRA_SHAPIRA_USER_ID
-        }
-      }
-    })
-    const totalCoins = users.reduce((acc, cur) => acc + cur.accountBalance.toNumber(), 0)
-
-    const usersWithTransactionsCount = await prisma.user.findMany({
-      select: {
-        _count: {
-          select: {
-            transactions: {
-              where: {
-                createdAt: dateQuery,
-              },
-            },
-          },
-        },
-      },
-      where: {
-        NOT: {
-          id: process.env.LIRA_SHAPIRA_USER_ID,
-        },
-      },
-    });
-    const transactionsPerUser = convertUserWithTransactionsCountToCountArray(
-      usersWithTransactionsCount
-    );
-    const averageTransactionsPerUser =
-      transactionsPerUser.reduce((a, b) => a + b) / transactionsPerUser.length;
-
-    const usersWithDepositCount = await prisma.user.findMany({
-      select: {
-        _count: {
-          select: {
-            transactions: {
-              where: {
-                createdAt: dateQuery,
-                category: Category.DEPOSIT,
-              },
-            },
-          },
-        },
-      },
-      where: {
-        NOT: {
-          id: process.env.LIRA_SHAPIRA_USER_ID,
-        },
-      },
-    });
-
-    const depositsPerUser = convertUserWithTransactionsCountToCountArray(
-      usersWithDepositCount
-    );
-
-    const rawBalanceCounts = await prisma.user.groupBy({
-      by: ['accountBalance'],
-      _count: {
-        _all: true,
-      },
-    })
-    const balanceCounts = rawBalanceCounts
-      .map(b => ({ count: b._count._all, balance: b.accountBalance.toNumber() }))
-      .sort((a, b) => b.balance > a.balance ? -1 : 1)
-
-    // max age of 12 hours
-    res.header('Cache-Control', 'max-age=43200');
-    res.status(200).send({
-      userCount,
-      transactionsPerUser,
-      averageTransactionsPerUser,
-      depositsPerUser,
-      newUserCount,
-      period,
-      balanceCounts,
-      totalCoins
-    });
-  } catch (e: any) {
-    res.status(400).send({ error: e.message });
-  }
+  // TODO: Implement userStats with Supabase client
+  res.status(501).json({ error: 'userStats endpoint not yet migrated to Supabase client' });
 };
 
 // ___________________CLEANUP___________________CLEANUP___________________CLEANUP___________________
 export const deleteAllusers = async (_req: Request, res: Response) => {
-  const { count } = await prisma.user.deleteMany();
-  res.send(count);
+  // TODO: Implement deleteAllusers with Supabase client
+  res.status(501).json({ error: 'deleteAllusers endpoint not yet migrated to Supabase client' });
 };
 
 export const deleteUserByPhoneNumber = async (
   req: Request,
   res: Response
 ) => {
-  const phoneNumber: string = req.params.number;
-  try {
-    const id = await findUserIdByPhoneNumber(phoneNumber);
-
-    await prisma.compostReport.deleteMany({
-      where: {
-        userId: id,
-      },
-    });
-
-    await prisma.attendee.deleteMany({
-      where: {
-        userId: id,
-      },
-    });
-
-    const deletedUser = await prisma.user.delete({
-      where: {
-        id,
-      },
-    });
-    res.status(201).send(deletedUser);
-  } catch (e: any) {
-    res.status(400).json({ error: e.message });
-  }
+  // TODO: Implement deleteUserByPhoneNumber with Supabase client
+  res.status(501).json({ error: 'deleteUserByPhoneNumber endpoint not yet migrated to Supabase client' });
 };
