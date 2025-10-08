@@ -29,8 +29,35 @@ import {
 import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin } from './controllers/compostStandAdmins';
 import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
 import { checkVerify, startVerify } from './controllers/twilio';
+import { checkDatabaseHealth } from './index';
 
 const router = Router();
+
+// Health check endpoint
+router.get('/health', async (req, res) => {
+  try {
+    const dbHealthy = await checkDatabaseHealth();
+    if (dbHealthy) {
+      res.status(200).json({ 
+        status: 'healthy', 
+        database: 'connected',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(503).json({ 
+        status: 'unhealthy', 
+        database: 'disconnected',
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    res.status(503).json({ 
+      status: 'error', 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // USER OPERATIONS
 router.get('/users', getAllUsers);

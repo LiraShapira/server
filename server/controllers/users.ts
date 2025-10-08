@@ -11,12 +11,28 @@ import {
 type RequestBody<T> = Request<{}, {}, T>;
 
 export const getAllUsers = async (_req: Request, res: Response) => {
-  const users = await prisma.user.findMany({
-    include: {
-      transactions: true,
-    },
-  });
-  res.json(users);
+  try {
+    const users = await prisma.user.findMany({
+      include: {
+        transactions: true,
+      },
+    });
+    res.json(users);
+  } catch (error: any) {
+    console.error('Error in getAllUsers:', error);
+    if (error.code === 'P1001') {
+      // Database connection error
+      res.status(503).json({ 
+        error: 'Database connection lost. Please try again.',
+        code: 'DB_CONNECTION_ERROR'
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to fetch users',
+        message: error.message 
+      });
+    }
+  }
 };
 
 export const getUserByNumber = async (req: Request<{ phoneNumber: string }>, res: Response) => {
