@@ -6,6 +6,7 @@ import {
 } from '../../types/transactionTypes';
 import { convertDepositDTOToCompostReportData, findUserIdByPhoneNumber } from '../utils';
 import { standsNameToIdMap } from '../../constants/compostStands';
+import { randomUUID } from 'crypto';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
@@ -45,6 +46,7 @@ export const saveNewTransaction = async (
     const { data: newTransaction, error: transactionError } = await supabase
       .from('Transaction')
       .insert({
+        id: randomUUID(),
         category: transaction.category,
         amount: transaction.amount,
         purchaserId: transaction.purchaserId,
@@ -111,7 +113,7 @@ export const saveNewTransaction = async (
     const { error: recipientUpdateError } = await supabase
       .from('User')
       .update({ 
-        accountBalance: (parseFloat(recipientUser.accountBalance) + transaction.amount).toString()
+        accountBalance: (parseFloat(recipientUser.accountBalance) + parseFloat(transaction.amount.toString())).toString()
       })
       .eq('id', recipientId);
 
@@ -124,7 +126,7 @@ export const saveNewTransaction = async (
     const { error: purchaserUpdateError } = await supabase
       .from('User')
       .update({ 
-        accountBalance: (parseFloat(purchaserUser.accountBalance) - transaction.amount).toString()
+        accountBalance: (parseFloat(purchaserUser.accountBalance) - parseFloat(transaction.amount.toString())).toString()
       })
       .eq('id', transaction.purchaserId);
 
@@ -154,10 +156,35 @@ export const saveDeposit = async (
       throw new Error('no lira shapira user id available');
     }
 
+    // Check if the organization user exists
+    const { data: orgUserCheck, error: orgUserCheckError } = await supabase
+      .from('User')
+      .select('id')
+      .eq('id', orgId)
+      .single();
+
+    if (orgUserCheckError || !orgUserCheck) {
+      console.error('Organization user not found:', orgId);
+      return res.status(400).json({ error: 'Organization user not found in database' });
+    }
+
+    // Check if the depositor user exists
+    const { data: depositorUserCheck, error: depositorUserCheckError } = await supabase
+      .from('User')
+      .select('id')
+      .eq('id', body.userId)
+      .single();
+
+    if (depositorUserCheckError || !depositorUserCheck) {
+      console.error('Depositor user not found:', body.userId);
+      return res.status(400).json({ error: 'Depositor user not found in database' });
+    }
+
     // create main transaction for depositor (org as purchaser)
     const { data: mainTransaction, error: mainTransactionError } = await supabase
       .from('Transaction')
       .insert({
+        id: randomUUID(),
         amount: netGained,
         category: 'DEPOSIT',
         purchaserId: orgId,
@@ -208,7 +235,7 @@ export const saveDeposit = async (
     const { data: stand, error: standError } = await supabase
       .from('CompostStand')
       .select(`
-        admins:User(id, firstName, lastName)
+        admins:User!User_adminCompostStandId_fkey(id, firstName, lastName)
       `)
       .eq('compostStandId', compostStandId)
       .single();
@@ -255,6 +282,7 @@ export const saveDeposit = async (
         const { data: adminTransaction, error: adminTransactionError } = await supabase
           .from('Transaction')
           .insert({
+            id: randomUUID(),
             amount: share,
             category: 'DEPOSIT',
             purchaserId: body.userId,
@@ -367,7 +395,7 @@ export const handleRequest = async (
       const { error: recipientUpdateError } = await supabase
         .from('User')
         .update({
-          accountBalance: (parseFloat(recipientUser.accountBalance) + transaction.amount).toString()
+          accountBalance: (parseFloat(recipientUser.accountBalance) + parseFloat(transaction.amount.toString())).toString()
         })
         .eq('id', transaction.recipientId);
 
@@ -380,7 +408,7 @@ export const handleRequest = async (
       const { error: purchaserUpdateError } = await supabase
         .from('User')
         .update({
-          accountBalance: (parseFloat(purchaserUser.accountBalance) - transaction.amount).toString()
+          accountBalance: (parseFloat(purchaserUser.accountBalance) - parseFloat(transaction.amount.toString())).toString()
         })
         .eq('id', transaction.purchaserId);
 

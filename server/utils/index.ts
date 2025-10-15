@@ -2,6 +2,7 @@ import { supabase } from "../config/supabase";
 import { UserWithTransactionsCount } from "../../types/userTypes";
 import { DepositDTO } from "../../types/transactionTypes";
 import { standsNameToIdMap } from "../../constants/compostStands";
+import { randomUUID } from 'crypto';
 
 export const findUserIdByPhoneNumber = async (phoneNumber: string): Promise<string> => {
     try {
@@ -39,6 +40,7 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): an
     } = compostReport;
 
     return {
+        compostReportId: randomUUID(),
         depositWeight: depositWeight.toString(),
         dryMatterPresent:
             dryMatter === undefined ? undefined : dryMatter ? "yes" : "no",

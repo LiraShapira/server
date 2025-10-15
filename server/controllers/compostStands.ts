@@ -66,7 +66,7 @@ export const getCompostStands = async (_req: Request, res: Response) => {
       .select(`
         *,
         reports:CompostReport(*),
-        admins:User(*)
+        admins:User!User_adminCompostStandId_fkey(*)
       `);
 
     if (error) {

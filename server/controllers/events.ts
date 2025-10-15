@@ -1,6 +1,7 @@
 import { Request, Response } from "express"
 import { supabase } from "../config/supabase";
 import { DateTime } from "luxon";
+import { randomUUID } from 'crypto';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
@@ -19,6 +20,7 @@ export const addEvent = async (req: RequestBody<EventDTO>, res: Response) => {
   const luxonEndDateString = DateTime.fromISO(reqEvent.endDate).toString();
 
   const newEvent = {
+    id: randomUUID(),
     startDate: luxonStartDateString,
     endDate: luxonEndDateString,
     title: reqEvent.title,

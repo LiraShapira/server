@@ -10,7 +10,7 @@ export async function addCompostStandAdmin(req: Request<CompostStandAdminsReq>, 
             .from('CompostStand')
             .select(`
                 *,
-                admins:User(id)
+                admins:User!User_adminCompostStandId_fkey(id)
             `)
             .eq('compostStandId', compostStandId)
             .single();
@@ -71,7 +71,7 @@ export async function removeCompostStandAdmin(req: Request<CompostStandAdminsReq
             .from('CompostStand')
             .select(`
                 *,
-                admins:User(id)
+                admins:User!User_adminCompostStandId_fkey(id)
             `)
             .eq('compostStandId', compostStandId)
             .single();
@@ -107,7 +107,7 @@ export async function removeCompostStandAdmin(req: Request<CompostStandAdminsReq
             .from('CompostStand')
             .select(`
                 *,
-                admins:User(*)
+                admins:User!User_adminCompostStandId_fkey(*)
             `)
             .eq('compostStandId', compostStandId)
             .single();
@@ -130,7 +130,7 @@ export async function getAllCompostStandAdmins(_req: Request, res: Response) {
             .from('CompostStand')
             .select(`
                 *,
-                admins:User(*)
+                admins:User!User_adminCompostStandId_fkey(*)
             `);
 
         if (error) {

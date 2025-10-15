@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 import { phoneNumberReqObject, userReqObject } from '../../types/userTypes';
 import { supabase } from '../config/supabase';
-import { Category } from '@prisma/client';
 import { ErrorRes } from '../../types/commonTypes';
 import {
   convertUserWithTransactionsCountToCountArray,
   findUserIdByPhoneNumber,
 } from '../utils';
+import { randomUUID } from 'crypto';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
@@ -69,6 +69,7 @@ export const saveNewUser = async (
     const { data: user, error } = await supabase
       .from('User')
       .insert({
+        id: randomUUID(),
         firstName,
         lastName,
         phoneNumber,
