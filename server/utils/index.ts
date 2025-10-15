@@ -1,19 +1,22 @@
-import { $Enums, Prisma } from "@prisma/client";
-import { prisma } from "..";
+import { supabase } from "../config/supabase";
 import { UserWithTransactionsCount } from "../../types/userTypes";
 import { DepositDTO } from "../../types/transactionTypes";
 import { standsNameToIdMap } from "../../constants/compostStands";
 
 export const findUserIdByPhoneNumber = async (phoneNumber: string): Promise<string> => {
     try {
+        const { data: user, error } = await supabase
+            .from('User')
+            .select('id')
+            .eq('phoneNumber', phoneNumber)
+            .single();
 
-        const user = await prisma.user.findUnique({ where: { phoneNumber: phoneNumber } });
-        if (!user) {
+        if (error || !user) {
             throw new Error('No user exists for this number');
         }
         return user.id;
     } catch (error: any) {
-        throw new Error(error);
+        throw new Error(error.message || error);
     }
 }
 
@@ -21,7 +24,7 @@ export const convertUserWithTransactionsCountToCountArray = (userWithTransaction
     return userWithTransactionsCount.map(n => n._count.transactions);
 }
 
-export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): Prisma.CompostReportUncheckedCreateInput => {
+export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): any => {
     const { compostReport, userId } = depositDTO;
     const {
         compostStand,
@@ -36,7 +39,7 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): Pr
     } = compostReport;
 
     return {
-        depositWeight: new Prisma.Decimal(depositWeight),
+        depositWeight: depositWeight.toString(),
         dryMatterPresent:
             dryMatter === undefined ? undefined : dryMatter ? "yes" : "no",
         notes,

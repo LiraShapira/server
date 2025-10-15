@@ -1,6 +1,5 @@
 import { Request, Response } from "express"
-import { AttendeeRole, Event } from '@prisma/client';
-import { prisma } from "..";
+import { supabase } from "../config/supabase";
 import { DateTime } from "luxon";
 
 type RequestBody<T> = Request<{}, {}, T>;
@@ -24,34 +23,36 @@ export const addEvent = async (req: RequestBody<EventDTO>, res: Response) => {
     endDate: luxonEndDateString,
     title: reqEvent.title,
     description: reqEvent.description,
+    locationId: reqEvent.location.id,
   }
 
   try {
-    const event = await prisma.event.create({
-      include: {
-        attendees: true,
-        location: true
-      },
-      data: {
-        ...newEvent,
-        location: {
-          connect: {
-            id: reqEvent.location.id
-          }
-        }
-      },
-    });
+    const { data: event, error } = await supabase
+      .from('Event')
+      .insert(newEvent)
+      .select(`
+        *,
+        attendees:Attendee(*),
+        location:Location(*)
+      `)
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
     res.status(201).json(event);
   } catch (e: any) {
-    console.log(e);
-    res.status(400).send({ error: e.message })
+    console.error('Error in addEvent:', e);
+    res.status(400).json({ error: e.message });
   }
 }
 
 interface AddAttendeeArgs {
   attendee: {
     userId: string;
-    role: AttendeeRole,
+    role: string, // 'seller' | 'attendee' | 'volunteer'
     productsForSale?: string[],
   };
   eventId: string
@@ -62,46 +63,50 @@ export const addAttendee = async (req: RequestBody<AddAttendeeArgs>, res: Respon
   const { attendee, eventId } = req.body;
 
   try {
-    const existingAttendee = await prisma.attendee.findUnique({
-      where: {
-        userId_eventId: {
-          userId: attendee.userId,
-          eventId
-        }
-      }
-    });
+    // Check if attendee already exists
+    const { data: existingAttendee, error: fetchError } = await supabase
+      .from('Attendee')
+      .select('*')
+      .eq('userId', attendee.userId)
+      .eq('eventId', eventId)
+      .single();
 
     if (existingAttendee) {
       // Update the existing attendee
-      await prisma.attendee.update({
-        where: {
-          userId_eventId: {
-            userId: attendee.userId,
-            eventId
-          }
-        },
-        data: {
+      const { error: updateError } = await supabase
+        .from('Attendee')
+        .update({
           role: attendee.role,
           productsForSale: attendee.productsForSale || []
-        }
-      });
+        })
+        .eq('userId', attendee.userId)
+        .eq('eventId', eventId);
 
-
+      if (updateError) {
+        console.error('Supabase error updating attendee:', updateError);
+        return res.status(400).json({ error: updateError.message });
+      }
     } else {
-      await prisma.attendee.create({
-        data: {
+      // Create new attendee
+      const { error: createError } = await supabase
+        .from('Attendee')
+        .insert({
           userId: attendee.userId,
           role: attendee.role,
           productsForSale: attendee.productsForSale || [],
           eventId: eventId
-        }
-      });
+        });
+
+      if (createError) {
+        console.error('Supabase error creating attendee:', createError);
+        return res.status(400).json({ error: createError.message });
+      }
     }
 
-    getUpcomingEvents(req, res)
+    getUpcomingEvents(req, res);
   } catch (e: any) {
-    console.log(e);
-    res.status(400).send({ error: e.message });
+    console.error('Error in addAttendee:', e);
+    res.status(400).json({ error: e.message });
   }
 }
 
@@ -115,101 +120,122 @@ export const removeAttendee = async (req: RequestBody<RemoveAttendeeArgs>, res: 
   const { userId, eventId } = req.body;
 
   try {
-    await prisma.attendee.delete({
-      where: {
-        userId_eventId: {
-          userId,
-          eventId
-        }
+    const { error } = await supabase
+      .from('Attendee')
+      .delete()
+      .eq('userId', userId)
+      .eq('eventId', eventId);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Attendee not found' });
       }
-    });
+      return res.status(400).json({ error: error.message });
+    }
 
     getUpcomingEvents(req, res);
   } catch (e: any) {
-    if (e.code === 'P2025') {
-      return res.status(404).send({ error: 'Attendee not found' });
-    }
-
-    console.log(e);
-    res.status(400).send({ error: e.message });
+    console.error('Error in removeAttendee:', e);
+    res.status(400).json({ error: e.message });
   }
 }
 
 
 export const getAllEvents = async (_req: Request, res: Response) => {
   try {
-    const events = await prisma.event.findMany({
-      include: {
-        location: true,
-        attendees: {
-          include: {
-            user: true
-          }
-        }
-      }
-    });
+    const { data: events, error } = await supabase
+      .from('Event')
+      .select(`
+        *,
+        location:Location(*),
+        attendees:Attendee(
+          *,
+          user:User(*)
+        )
+      `);
 
-    res.status(200).json(events)
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(200).json(events);
   } catch (e: any) {
-    console.log(e);
-    res.status(200).send({ error: e.message })
+    console.error('Error in getAllEvents:', e);
+    res.status(500).json({ error: e.message });
   }
 }
 
 export const getUpcomingEvents = async (_req: RequestBody<any>, res: Response) => {
   try {
-    const events = await prisma.event.findMany({
-      include: {
-        location: true,
-        attendees: {
-          include: {
-            user: true
-          }
-        }
-      },
-      where: {
-        endDate: {
-          gte: new Date()
-        }
-      }
-    });
-    res.status(200).send(events);
-  }
-  catch (e: any) {
-    console.log(e);
-    res.status(400).json({ error: e.message });
+    const { data: events, error } = await supabase
+      .from('Event')
+      .select(`
+        *,
+        location:Location(*),
+        attendees:Attendee(
+          *,
+          user:User(*)
+        )
+      `)
+      .gte('endDate', new Date().toISOString());
 
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(200).send(events);
+  } catch (e: any) {
+    console.error('Error in getUpcomingEvents:', e);
+    res.status(500).json({ error: e.message });
   }
 }
 
 export const getLocations = async (_req: Request, res: Response) => {
   try {
-    const locations = await prisma.location.findMany();
-    res.status(200).send(locations);
-  }
-  catch (e: any) {
-    console.log(e);
-    res.status(400).json({ error: e.message });
+    const { data: locations, error } = await supabase
+      .from('Location')
+      .select('*');
 
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(200).send(locations);
+  } catch (e: any) {
+    console.error('Error in getLocations:', e);
+    res.status(500).json({ error: e.message });
   }
 }
 
 export const deleteEvent = async (req: RequestBody<{ id: string }>, res: Response) => {
   try {
-    await prisma.event.delete({
-      where: {
-        id: req.body.id,
-      }
-    });
-    getUpcomingEvents(req, res);
+    const { error } = await supabase
+      .from('Event')
+      .delete()
+      .eq('id', req.body.id);
 
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    getUpcomingEvents(req, res);
   } catch (e: any) {
-    console.log(e);
-    res.status(400).json({ error: e.message })
+    console.error('Error in deleteEvent:', e);
+    res.status(400).json({ error: e.message });
   }
 }
 
-interface UpdateEventReqBody extends Omit<Event, 'locationId'> {
+interface UpdateEventReqBody {
+  id: string;
+  startDate: string;
+  endDate: string;
+  title: string;
+  description: string;
   location: {
     id: string;
   }
@@ -217,24 +243,25 @@ interface UpdateEventReqBody extends Omit<Event, 'locationId'> {
 
 export const updateEvent = async (req: RequestBody<UpdateEventReqBody>, res: Response) => {
   try {
-    await prisma.event.update({
-      where: {
-        id: req.body.id
-      },
-      data: {
-        ...req.body,
-        id: req.body.id,
-        location: {
-          update: {
-            ...req.body.location
-          }
-        }
-      }
-    });
+    const { error } = await supabase
+      .from('Event')
+      .update({
+        startDate: req.body.startDate,
+        endDate: req.body.endDate,
+        title: req.body.title,
+        description: req.body.description,
+        locationId: req.body.location.id
+      })
+      .eq('id', req.body.id);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
 
     getUpcomingEvents(req, res);
   } catch (e: any) {
-    console.log(e);
-    res.status(400).json({ error: e.message })
+    console.error('Error in updateEvent:', e);
+    res.status(400).json({ error: e.message });
   }
 }

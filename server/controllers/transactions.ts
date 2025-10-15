@@ -1,19 +1,30 @@
 import { Request, Response } from 'express';
-import { prisma } from '..';
+import { supabase } from '../config/supabase';
 import {
   DepositDTO, HandleRequestDTO,
   TransactionDTO,
 } from '../../types/transactionTypes';
-import { Category, Transaction } from '@prisma/client';
 import { convertDepositDTOToCompostReportData, findUserIdByPhoneNumber } from '../utils';
 import { standsNameToIdMap } from '../../constants/compostStands';
-import { Decimal } from '@prisma/client/runtime/library';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
-export const getAllTransactions = async (_req: Request, res: Response<Transaction[]>) => {
-  const transactions = await prisma.transaction.findMany();
-  res.json(transactions);
+export const getAllTransactions = async (_req: Request, res: Response) => {
+  try {
+    const { data: transactions, error } = await supabase
+      .from('Transaction')
+      .select('*');
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(transactions);
+  } catch (e: any) {
+    console.error('Error in getAllTransactions:', e);
+    res.status(500).json({ error: e.message });
+  }
 };
 
 /**
@@ -29,51 +40,102 @@ export const saveNewTransaction = async (
     const recipientId = await findUserIdByPhoneNumber(
       transaction.recipientPhoneNumber
     );
-    const transactionWithUsers =
-      await prisma.transaction.create({
-        data: {
-          category: transaction.category,
-          amount: transaction.amount,
-          purchaserId: transaction.purchaserId,
-          reason: transaction.reason,
-          recipientId,
-          isRequest: transaction.isRequest,
-          users: {
-            connect: [{ id: recipientId }, { id: transaction.purchaserId }],
-          },
-        },
-        include: {
-          users: {
-            where: {
-              id: transaction.isRequest ? transaction.purchaserId : recipientId
-            }
-          },
-        },
-      });
+
+    // Create the transaction
+    const { data: newTransaction, error: transactionError } = await supabase
+      .from('Transaction')
+      .insert({
+        category: transaction.category,
+        amount: transaction.amount,
+        purchaserId: transaction.purchaserId,
+        reason: transaction.reason,
+        recipientId,
+        isRequest: transaction.isRequest,
+      })
+      .select()
+      .single();
+
+    if (transactionError) {
+      console.error('Supabase error creating transaction:', transactionError);
+      return res.status(400).json({ error: transactionError.message });
+    }
+
+    // Get the user for the response
+    const userId = transaction.isRequest ? transaction.purchaserId : recipientId;
+    const { data: user, error: userError } = await supabase
+      .from('User')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      console.error('Supabase error fetching user:', userError);
+      return res.status(400).json({ error: userError.message });
+    }
+
+    const transactionWithUsers = {
+      ...newTransaction,
+      users: [user]
+    };
 
     if (transaction.isRequest) {
       res.status(201).json(transactionWithUsers);
       return;
     }
 
-    // TODO check balance is adequate for transaction
-    await prisma.user.update({
-      where: {
-        id: recipientId,
-      },
-      data: { accountBalance: { increment: transaction.amount } },
-    });
+    // Update balances for non-request transactions
+    // First get current balances
+    const { data: recipientUser, error: recipientFetchError } = await supabase
+      .from('User')
+      .select('accountBalance')
+      .eq('id', recipientId)
+      .single();
 
-    await prisma.user.update({
-      where: {
-        id: transaction.purchaserId,
-      },
-      data: { accountBalance: { decrement: transaction.amount } },
-    });
+    if (recipientFetchError) {
+      console.error('Supabase error fetching recipient balance:', recipientFetchError);
+      return res.status(400).json({ error: recipientFetchError.message });
+    }
+
+    const { data: purchaserUser, error: purchaserFetchError } = await supabase
+      .from('User')
+      .select('accountBalance')
+      .eq('id', transaction.purchaserId)
+      .single();
+
+    if (purchaserFetchError) {
+      console.error('Supabase error fetching purchaser balance:', purchaserFetchError);
+      return res.status(400).json({ error: purchaserFetchError.message });
+    }
+
+    // Update recipient balance
+    const { error: recipientUpdateError } = await supabase
+      .from('User')
+      .update({ 
+        accountBalance: (parseFloat(recipientUser.accountBalance) + transaction.amount).toString()
+      })
+      .eq('id', recipientId);
+
+    if (recipientUpdateError) {
+      console.error('Supabase error updating recipient balance:', recipientUpdateError);
+      return res.status(400).json({ error: recipientUpdateError.message });
+    }
+
+    // Update purchaser balance
+    const { error: purchaserUpdateError } = await supabase
+      .from('User')
+      .update({ 
+        accountBalance: (parseFloat(purchaserUser.accountBalance) - transaction.amount).toString()
+      })
+      .eq('id', transaction.purchaserId);
+
+    if (purchaserUpdateError) {
+      console.error('Supabase error updating purchaser balance:', purchaserUpdateError);
+      return res.status(400).json({ error: purchaserUpdateError.message });
+    }
 
     res.status(201).json(transactionWithUsers);
   } catch (e: any) {
-    console.log(e);
+    console.error('Error in saveNewTransaction:', e);
     res.status(400).json({ error: e.message });
   }
 };
@@ -93,103 +155,168 @@ export const saveDeposit = async (
     }
 
     // create main transaction for depositor (org as purchaser)
-    const mainTransaction = await prisma.transaction.create({
-      data: {
+    const { data: mainTransaction, error: mainTransactionError } = await supabase
+      .from('Transaction')
+      .insert({
         amount: netGained,
-        category: Category.DEPOSIT,
+        category: 'DEPOSIT',
         purchaserId: orgId,
         recipientId: body.userId,
         reason: 'Deposit',
-        users: {
-          connect: [
-            { id: orgId },
-            { id: body.userId },
-          ],
-        },
-      },
-      include: {
-        users: true
-      },
-    });
+      })
+      .select()
+      .single();
 
-    const responseTransactions: Array<typeof mainTransaction & { amount: Decimal; users: Array<{ firstName: string; lastName: string }> }> = [];
+    if (mainTransactionError) {
+      console.error('Supabase error creating main transaction:', mainTransactionError);
+      return res.status(400).json({ error: mainTransactionError.message });
+    }
 
-    // helper to duplicate single user entry when purchaser === recipient
-    const normalizeUsers = (tx: typeof mainTransaction) => {
-      const list = [...tx.users];
-      if (tx.purchaserId === tx.recipientId) {
-        // duplicate so both slots appear
-        list.push({ ...list[0] });
-      }
-      return list;
+    // Get users for the main transaction
+    const { data: orgUser, error: orgUserError } = await supabase
+      .from('User')
+      .select('firstName, lastName')
+      .eq('id', orgId)
+      .single();
+
+    const { data: depositorUser, error: depositorUserError } = await supabase
+      .from('User')
+      .select('firstName, lastName')
+      .eq('id', body.userId)
+      .single();
+
+    if (orgUserError || depositorUserError) {
+      console.error('Supabase error fetching users:', orgUserError || depositorUserError);
+      return res.status(400).json({ error: (orgUserError || depositorUserError)?.message });
+    }
+
+    const responseTransactions: Array<any> = [];
+
+    // helper to normalize users array
+    const normalizeUsers = (purchaser: any, recipient: any) => {
+      return [purchaser, recipient];
     };
 
-    // push main txn (no self-tip here, purchaser always org)
+    // push main txn
     responseTransactions.push({
       ...mainTransaction,
-      users: normalizeUsers(mainTransaction),
-      amount: new Decimal(netGained),
+      users: normalizeUsers(orgUser, depositorUser),
+      amount: netGained,
     });
 
     // fetch stand admins
-    const stand = await prisma.compostStand.findUnique({
-      where: { compostStandId },
-      select: { admins: true },
-    });
+    const { data: stand, error: standError } = await supabase
+      .from('CompostStand')
+      .select(`
+        admins:User(id, firstName, lastName)
+      `)
+      .eq('compostStandId', compostStandId)
+      .single();
+
+    if (standError) {
+      console.error('Supabase error fetching stand:', standError);
+      return res.status(400).json({ error: standError.message });
+    }
 
     if (stand?.admins?.length) {
       const share = tenPercent / stand.admins.length;
 
       for (const admin of stand.admins) {
         if (admin.id === body.userId) {
-          continue
+          continue;
         }
+
+        // Get current admin balance
+        const { data: adminUser, error: adminUserError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', admin.id)
+          .single();
+
+        if (adminUserError) {
+          console.error('Supabase error fetching admin balance:', adminUserError);
+          continue;
+        }
+
         // distribute bonus to admin balance
-        await prisma.user.update({
-          where: { id: admin.id },
-          data: { accountBalance: { increment: share } },
-        });
+        const { error: adminBalanceError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(adminUser.accountBalance) + share).toString()
+          })
+          .eq('id', admin.id);
+
+        if (adminBalanceError) {
+          console.error('Supabase error updating admin balance:', adminBalanceError);
+          continue;
+        }
 
         // record admin transaction (user as purchaser)
-        const adminTransaction = await prisma.transaction.create({
-          data: {
+        const { data: adminTransaction, error: adminTransactionError } = await supabase
+          .from('Transaction')
+          .insert({
             amount: share,
-            category: Category.DEPOSIT,
+            category: 'DEPOSIT',
             purchaserId: body.userId,
             recipientId: admin.id,
             reason: 'StandAdminPayment',
-            users: {
-              connect: [
-                { id: body.userId },
-                { id: admin.id },
-              ],
-            },
-          },
-          include: {
-            users: true,
-          },
-        });
+          })
+          .select()
+          .single();
+
+        if (adminTransactionError) {
+          console.error('Supabase error creating admin transaction:', adminTransactionError);
+          continue;
+        }
 
         responseTransactions.push({
           ...adminTransaction,
-          users: normalizeUsers(adminTransaction),
-          amount: new Decimal(share),
+          users: normalizeUsers(depositorUser, admin),
+          amount: share,
         });
       }
     }
 
-    // finalize depositor balance update and report logging
-    await prisma.user.update({
-      where: { id: body.userId },
-      data: { accountBalance: { increment: netGained } },
-    });
-    await prisma.compostReport.create({ data: convertDepositDTOToCompostReportData(body) });
+    // Get current depositor balance
+    const { data: depositorBalance, error: depositorBalanceError } = await supabase
+      .from('User')
+      .select('accountBalance')
+      .eq('id', body.userId)
+      .single();
 
-    // respond with one or two txns
+    if (depositorBalanceError) {
+      console.error('Supabase error fetching depositor balance:', depositorBalanceError);
+      return res.status(400).json({ error: depositorBalanceError.message });
+    }
+
+    // finalize depositor balance update
+    const { error: depositorUpdateError } = await supabase
+      .from('User')
+      .update({
+        accountBalance: (parseFloat(depositorBalance.accountBalance) + netGained).toString()
+      })
+      .eq('id', body.userId);
+
+    if (depositorUpdateError) {
+      console.error('Supabase error updating depositor balance:', depositorUpdateError);
+      return res.status(400).json({ error: depositorUpdateError.message });
+    }
+
+    // create compost report
+    const { error: reportError } = await supabase
+      .from('CompostReport')
+      .insert(convertDepositDTOToCompostReportData(body));
+
+    if (reportError) {
+      console.error('Supabase error creating compost report:', reportError);
+      return res.status(400).json({ error: reportError.message });
+    }
+
+    // respond with transactions
     res.status(201).send(responseTransactions);
-  } catch (e) {
-    console.error(e);
-    res.status(400).send(e);
+  } catch (e: any) {
+    console.error('Error in saveDeposit:', e);
+    res.status(400).json({ error: e.message });
   }
 };
 
@@ -200,45 +327,92 @@ export const handleRequest = async (
 ) => {
   const { transaction, isRequestAccepted } = body;
   const transactionId = body.transaction.id;
-  let updatedTransaction: Transaction;
+  
   try {
     if (isRequestAccepted) {
-      updatedTransaction = await prisma.transaction.update({
-        where: {
-          id: transactionId
-        },
-        data: {
+      // Update transaction to mark as accepted
+      const { data: updatedTransaction, error: updateError } = await supabase
+        .from('Transaction')
+        .update({
           isRequest: false
-        }
-      });
+        })
+        .eq('id', transactionId)
+        .select()
+        .single();
 
-      await prisma.user.update({
-        where: {
-          id: transaction.recipientId,
-        },
-        data: { accountBalance: { increment: transaction.amount } },
-      });
+      if (updateError) {
+        console.error('Supabase error updating transaction:', updateError);
+        return res.status(400).json({ error: updateError.message });
+      }
 
-      await prisma.user.update({
-        where: {
-          id: transaction.purchaserId,
-        },
-        data: { accountBalance: { decrement: transaction.amount } },
+      // Get current balances
+      const { data: recipientUser, error: recipientFetchError } = await supabase
+        .from('User')
+        .select('accountBalance')
+        .eq('id', transaction.recipientId)
+        .single();
+
+      const { data: purchaserUser, error: purchaserFetchError } = await supabase
+        .from('User')
+        .select('accountBalance')
+        .eq('id', transaction.purchaserId)
+        .single();
+
+      if (recipientFetchError || purchaserFetchError) {
+        console.error('Supabase error fetching user balances:', recipientFetchError || purchaserFetchError);
+        return res.status(400).json({ error: (recipientFetchError || purchaserFetchError)?.message });
+      }
+
+      // Update recipient balance
+      const { error: recipientUpdateError } = await supabase
+        .from('User')
+        .update({
+          accountBalance: (parseFloat(recipientUser.accountBalance) + transaction.amount).toString()
+        })
+        .eq('id', transaction.recipientId);
+
+      if (recipientUpdateError) {
+        console.error('Supabase error updating recipient balance:', recipientUpdateError);
+        return res.status(400).json({ error: recipientUpdateError.message });
+      }
+
+      // Update purchaser balance
+      const { error: purchaserUpdateError } = await supabase
+        .from('User')
+        .update({
+          accountBalance: (parseFloat(purchaserUser.accountBalance) - transaction.amount).toString()
+        })
+        .eq('id', transaction.purchaserId);
+
+      if (purchaserUpdateError) {
+        console.error('Supabase error updating purchaser balance:', purchaserUpdateError);
+        return res.status(400).json({ error: purchaserUpdateError.message });
+      }
+
+      res.status(201).send({
+        ...updatedTransaction,
+        isRequest: false
       });
     } else {
-      updatedTransaction = await prisma.transaction.delete({
-        where: {
-          id: transactionId
-        }
-      })
-    }
+      // Delete the transaction
+      const { error: deleteError } = await supabase
+        .from('Transaction')
+        .delete()
+        .eq('id', transactionId);
 
-    res.status(201).send({
-      ...updatedTransaction,
-      isRequest: false
-    });
-  } catch (e) {
-    res.status(400).send(e)
+      if (deleteError) {
+        console.error('Supabase error deleting transaction:', deleteError);
+        return res.status(400).json({ error: deleteError.message });
+      }
+
+      res.status(201).send({
+        id: transactionId,
+        isRequest: false
+      });
+    }
+  } catch (e: any) {
+    console.error('Error in handleRequest:', e);
+    res.status(400).json({ error: e.message });
   }
 }
 
@@ -284,39 +458,47 @@ export const transactionStats = async (req: Request, res: Response) => {
     period = parseInt(req.query.period);
   }
 
-  const dateQuery = {
-    lte: new Date(),
-    // TODO make possible to set dynamically from query params
-    gte: new Date(new Date().setDate(new Date().getDate() - period)),
-  };
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(endDate.getDate() - period);
 
   try {
-    // TODO amount per transaction spread
-    // TODO average amount per transaction
+    // Get all transactions in the period
+    const { data: transactions, error } = await supabase
+      .from('Transaction')
+      .select('category, amount')
+      .gte('createdAt', startDate.toISOString())
+      .lte('createdAt', endDate.toISOString())
+      .eq('isRequest', false);
 
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
 
-    // TODO REMOVE
-    const groupTransactions = await prisma.transaction.groupBy({
-      by: ['category'],
-      _sum: {
-        amount: true,
-      },
-      where: {
-        createdAt: dateQuery,
-        isRequest: false
+    // Group by category and sum amounts
+    const categoryStats: { [key: string]: number } = {};
+    
+    transactions.forEach(transaction => {
+      const category = transaction.category;
+      const amount = parseFloat(transaction.amount);
+      
+      if (!categoryStats[category]) {
+        categoryStats[category] = 0;
       }
+      
+      categoryStats[category] += amount;
     });
 
-    const transactionAmountByCategory = groupTransactions.map(transaction => {
-      return {
-        category: transaction.category,
-        amount: transaction._sum.amount
-      }
-    })
+    const transactionAmountByCategory = Object.entries(categoryStats).map(([category, amount]) => ({
+      category,
+      amount: Number(amount.toFixed(2))
+    }));
 
     res.status(200).send({ transactionAmountByCategory });
   } catch (e: any) {
-    res.status(400).send({ error: e.message });
+    console.error('Error in transactionStats:', e);
+    res.status(400).json({ error: e.message });
   }
 };
 
@@ -326,13 +508,21 @@ export const deleteTransaction = async (
 ) => {
   const transactionId = req.params.id;
   try {
-    const transaction = await prisma.transaction.delete({
-      where: {
-        id: transactionId
-      }
-    });
+    const { data: transaction, error } = await supabase
+      .from('Transaction')
+      .delete()
+      .eq('id', transactionId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
     res.status(200).send(transaction);
-  } catch (e) {
-    res.status(400).send(e);
+  } catch (e: any) {
+    console.error('Error in deleteTransaction:', e);
+    res.status(400).json({ error: e.message });
   }
 }
