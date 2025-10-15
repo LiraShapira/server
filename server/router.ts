@@ -18,16 +18,16 @@ import {
   monthlyCompostStandStats,
   getCompostReports,
   getCompostReportsStats,
-} from './controllers/compostStands';
+} from './controllers/compostStands-supabase';
 import {
   getAllTransactions,
   saveNewTransaction,
   saveDeposit,
   transactionStats,
   handleRequest
-} from './controllers/transactions';
-import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin } from './controllers/compostStandAdmins';
-import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
+} from './controllers/transactions-supabase';
+import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin } from './controllers/compostStandAdmins-supabase';
+import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events-supabase';
 import { checkVerify, startVerify } from './controllers/twilio';
 import { checkDatabaseHealth } from './utils/healthCheck';
 

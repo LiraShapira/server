@@ -1,4 +1,4 @@
-import app from './server';
+import app from './app';
 import { PrismaClient } from '@prisma/client';
 
 const PORT = Number(process.env.PORT) || 3001;
