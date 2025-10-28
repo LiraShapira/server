@@ -146,8 +146,8 @@ export const saveDeposit = async (
   { body }: RequestBody<DepositDTO>,
   res: Response
 ) => {
-  const netGained = body.compostReport.depositWeight;
-  const tenPercent = body.compostReport.depositWeight * 0.1;
+  const netGained = parseFloat(body.compostReport.depositWeight.toString());
+  const tenPercent = netGained * 0.1;
   const compostStandId = standsNameToIdMap[body.compostReport.compostStand];
 
   try {
@@ -228,7 +228,7 @@ export const saveDeposit = async (
     responseTransactions.push({
       ...mainTransaction,
       users: normalizeUsers(orgUser, depositorUser),
-      amount: netGained,
+      amount: Number(netGained),
     });
 
     // fetch stand admins
@@ -269,7 +269,7 @@ export const saveDeposit = async (
         const { error: adminBalanceError } = await supabase
           .from('User')
           .update({
-            accountBalance: (parseFloat(adminUser.accountBalance) + share).toString()
+            accountBalance: (parseFloat(adminUser.accountBalance) + Number(share)).toString()
           })
           .eq('id', admin.id);
 
@@ -300,7 +300,7 @@ export const saveDeposit = async (
         responseTransactions.push({
           ...adminTransaction,
           users: normalizeUsers(depositorUser, admin),
-          amount: share,
+          amount: Number(share),
         });
       }
     }
@@ -318,10 +318,17 @@ export const saveDeposit = async (
     }
 
     // finalize depositor balance update
+    console.log('Updating depositor balance:');
+    console.log('Current balance:', depositorBalance.accountBalance, 'Type:', typeof depositorBalance.accountBalance);
+    console.log('Net gained:', netGained, 'Type:', typeof netGained);
+    console.log('Number(netGained):', Number(netGained));
+    const newBalance = parseFloat(depositorBalance.accountBalance) + Number(netGained);
+    console.log('New balance calculation:', parseFloat(depositorBalance.accountBalance), '+', Number(netGained), '=', newBalance);
+    
     const { error: depositorUpdateError } = await supabase
       .from('User')
       .update({
-        accountBalance: (parseFloat(depositorBalance.accountBalance) + netGained).toString()
+        accountBalance: newBalance.toString()
       })
       .eq('id', body.userId);
 
@@ -341,6 +348,8 @@ export const saveDeposit = async (
     }
 
     // respond with transactions
+    console.log('Sending response transactions:', responseTransactions);
+    console.log('Main transaction amount:', responseTransactions[0]?.amount, 'Type:', typeof responseTransactions[0]?.amount);
     res.status(201).send(responseTransactions);
   } catch (e: any) {
     console.error('Error in saveDeposit:', e);
