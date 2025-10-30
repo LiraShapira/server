@@ -99,28 +99,77 @@ export const getUser = async (
   const { phoneNumber } = req.body;
   
   try {
-    const { data: user, error } = await supabase
+    // 1) Fetch the user by phone number
+    const { data: baseUser, error: userError } = await supabase
       .from('User')
-      .select(`
-        *,
-        transactions:Transaction(
-          *,
-          users:User(*)
-        )
-      `)
+      .select('*')
       .eq('phoneNumber', phoneNumber)
       .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
+    if (userError) {
+      if (userError.code === 'PGRST116') {
         return res.status(400).json({ error: 'User not found' });
       }
-      console.error('Supabase error:', error);
-      return res.status(500).json({ error: error.message });
+      console.error('Supabase error (getUser user fetch):', userError);
+      return res.status(500).json({ error: userError.message });
     }
 
-    res.status(200).send(user);
+    // 2) Fetch all transactions where the user is purchaser or recipient
+    const { data: transactions, error: txError } = await supabase
+      .from('Transaction')
+      .select('*')
+      .or(`purchaserId.eq.${baseUser.id},recipientId.eq.${baseUser.id}`)
+      .order('createdAt', { ascending: false });
+
+    if (txError) {
+      console.error('Supabase error (getUser transactions fetch):', txError);
+      return res.status(500).json({ error: txError.message });
+    }
+
+    // 3) Collect all related userIds from transactions and fetch those users once
+    const relatedUserIds = Array.from(
+      new Set(
+        (transactions || [])
+          .flatMap(t => [t.purchaserId, t.recipientId])
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    let usersById: Record<string, any> = {};
+    if (relatedUserIds.length > 0) {
+      const { data: relatedUsers, error: usersError } = await supabase
+        .from('User')
+        .select('*')
+        .in('id', relatedUserIds);
+
+      if (usersError) {
+        console.error('Supabase error (getUser related users fetch):', usersError);
+        return res.status(500).json({ error: usersError.message });
+      }
+
+      usersById = (relatedUsers || []).reduce((acc: Record<string, any>, u: any) => {
+        acc[u.id] = u;
+        return acc;
+      }, {});
+    }
+
+    // 4) Attach users array to each transaction to match app expectations
+    const transactionsWithUsers = (transactions || []).map(t => {
+      const purchaser = t.purchaserId ? usersById[t.purchaserId] : null;
+      const recipient = t.recipientId ? usersById[t.recipientId] : null;
+      const users = [purchaser, recipient].filter(Boolean);
+      return { ...t, users };
+    });
+
+    // 5) Return the user merged with transactions
+    const responseUser = {
+      ...baseUser,
+      transactions: transactionsWithUsers,
+    };
+
+    res.status(200).send(responseUser);
   } catch (e: any) {
+    console.error('Error in getUser:', e);
     res.status(400).json({ error: e.message });
   }
 };
