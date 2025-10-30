@@ -247,7 +247,7 @@ export const compostStandStats = async (req: Request, res: Response) => {
     const standStats: { [key: number]: { sum: number; count: number; weights: number[] } } = {};
 
     const filteredReports = (reports || []).filter((report: any) => {
-      if (!report.date) return false;
+      if (!report.date) return true; // include records without date
       const d = new Date(report.date);
       return d >= startDate && d <= endDate;
     });
