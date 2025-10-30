@@ -235,7 +235,7 @@ export const compostStandStats = async (req: Request, res: Response) => {
   try {
     const { data: reports, error } = await supabase
       .from('CompostReport')
-      .select('compostStandId, depositWeight, date, createdAt, userId')
+      .select('compostStandId, depositWeight, date, userId')
       .neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
 
     if (error) {
@@ -247,8 +247,8 @@ export const compostStandStats = async (req: Request, res: Response) => {
     const standStats: { [key: number]: { sum: number; count: number; weights: number[] } } = {};
 
     const filteredReports = (reports || []).filter((report: any) => {
-      const d = report.date ? new Date(report.date) : (report.createdAt ? new Date(report.createdAt) : null);
-      if (!d) return false;
+      if (!report.date) return false;
+      const d = new Date(report.date);
       return d >= startDate && d <= endDate;
     });
 
