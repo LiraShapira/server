@@ -500,39 +500,62 @@ export const transactionStats = async (req: Request, res: Response) => {
   startDate.setDate(endDate.getDate() - period);
 
   try {
-    // Get all transactions in the period
-    const { data: transactions, error } = await supabase
+    // Fetch transactions with required fields
+    const { data: transactions, error: transactionsError } = await supabase
       .from('Transaction')
-      .select('category, amount')
+      .select('id, recipientId, purchaserId, category, amount, createdAt, reason, isRequest')
       .gte('createdAt', startDate.toISOString())
       .lte('createdAt', endDate.toISOString())
       .eq('isRequest', false);
 
-    if (error) {
-      console.error('Supabase error:', error);
-      return res.status(500).json({ error: error.message });
+    if (transactionsError) {
+      console.error('Supabase error fetching transactions:', transactionsError);
+      return res.status(500).json({ error: transactionsError.message });
     }
 
-    // Group by category and sum amounts
-    const categoryStats: { [key: string]: number } = {};
-    
-    transactions.forEach(transaction => {
-      const category = transaction.category;
-      const amount = parseFloat(transaction.amount);
-      
-      if (!categoryStats[category]) {
-        categoryStats[category] = 0;
-      }
-      
-      categoryStats[category] += amount;
-    });
+    const txns = transactions || [];
 
-    const transactionAmountByCategory = Object.entries(categoryStats).map(([category, amount]) => ({
-      category,
-      amount: Number(amount.toFixed(2))
+    // Collect unique user ids from purchaser and recipient
+    const userIdsSet = new Set<string>();
+    txns.forEach(t => {
+      if (t.purchaserId) userIdsSet.add(t.purchaserId);
+      if (t.recipientId) userIdsSet.add(t.recipientId);
+    });
+    const userIds = Array.from(userIdsSet);
+
+    // Fetch user details for names
+    let usersMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const { data: users, error: usersError } = await supabase
+        .from('User')
+        .select('id, firstName, lastName')
+        .in('id', userIds);
+
+      if (usersError) {
+        console.error('Supabase error fetching users:', usersError);
+        return res.status(500).json({ error: usersError.message });
+      }
+
+      usersMap = (users || []).reduce((acc: Record<string, any>, u: any) => {
+        acc[u.id] = u;
+        return acc;
+      }, {});
+    }
+
+    // Build response transactions with users array
+    const responseTransactions = txns.map(t => ({
+      ...t,
+      amount: Number(t.amount),
+      users: [
+        t.purchaserId ? usersMap[t.purchaserId] : null,
+        t.recipientId ? usersMap[t.recipientId] : null,
+      ].filter(Boolean)
     }));
 
-    res.status(200).send({ transactionAmountByCategory });
+    res.status(200).send({
+      count: responseTransactions.length,
+      transactions: responseTransactions
+    });
   } catch (e: any) {
     console.error('Error in transactionStats:', e);
     res.status(400).json({ error: e.message });
