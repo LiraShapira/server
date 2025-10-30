@@ -227,20 +227,35 @@ export const compostStandStats = async (req: Request, res: Response) => {
   if (req.query.period && typeof req.query.period === 'string') {
     period = parseInt(req.query.period);
   }
+  const debug = req.query.debug === '1' || req.query.debug === 'true';
   
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(endDate.getDate() - period);
 
   try {
-    const { data: reports, error } = await supabase
+    let query = supabase
       .from('CompostReport')
-      .select('compostStandId, depositWeight, date, userId')
-      .neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
+      .select('compostStandId, depositWeight, date, userId');
+
+    if (!debug) {
+      query = query.neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
+    }
+
+    const { data: reports, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
       return res.status(500).json({ error: error.message });
+    }
+
+    if (debug) {
+      const sample = (reports || []).slice(0, 5);
+      return res.status(200).json({
+        debug: true,
+        received: { count: reports?.length || 0, sample },
+        note: 'Debug mode bypasses userId exclusion and period filtering.'
+      });
     }
 
     // Group by compostStandId and calculate stats
