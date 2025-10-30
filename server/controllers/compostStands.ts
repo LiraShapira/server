@@ -228,6 +228,7 @@ export const compostStandStats = async (req: Request, res: Response) => {
     period = parseInt(req.query.period);
   }
   const debug = req.query.debug === '1' || req.query.debug === 'true';
+  const includeOrg = req.query.includeOrg === '1' || req.query.includeOrg === 'true';
   
   const endDate = new Date();
   const startDate = new Date();
@@ -238,7 +239,7 @@ export const compostStandStats = async (req: Request, res: Response) => {
       .from('CompostReport')
       .select('compostStandId, depositWeight, date, userId');
 
-    if (!debug) {
+    if (!debug && !includeOrg) {
       query = query.neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
     }
 
