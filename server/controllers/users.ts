@@ -351,3 +351,70 @@ export const deleteUserByPhoneNumber = async (
   // TODO: Implement deleteUserByPhoneNumber with Supabase client
   res.status(501).json({ error: 'deleteUserByPhoneNumber endpoint not yet migrated to Supabase client' });
 };
+
+export const verifyUser = async (
+  req: RequestBody<{ userId: string }>,
+  res: Response
+) => {
+  const { userId } = req.body;
+  
+  try {
+    const { data: user, error } = await supabase
+      .from('User')
+      .update({ isVerified: true })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error verifying user:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(200).send(user);
+  } catch (e: any) {
+    console.error('Error in verifyUser:', e);
+    res.status(400).json({ error: e.message });
+  }
+};
+
+export const toggleBanUser = async (
+  req: RequestBody<{ userId: string }>,
+  res: Response
+) => {
+  const { userId } = req.body;
+  
+  try {
+    // First, get the current ban status
+    const { data: currentUser, error: fetchError } = await supabase
+      .from('User')
+      .select('isBanned')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError) {
+      console.error('Supabase error fetching user:', fetchError);
+      return res.status(400).json({ error: fetchError.message });
+    }
+
+    // Toggle the ban status (treat null/undefined as false)
+    const newBanStatus = !(currentUser.isBanned === true);
+
+    const { data: user, error } = await supabase
+      .from('User')
+      .update({ isBanned: newBanStatus })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error toggling ban:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(200).send(user);
+  } catch (e: any) {
+    console.error('Error in toggleBanUser:', e);
+    res.status(400).json({ error: e.message });
+  }
+};
