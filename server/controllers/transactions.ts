@@ -568,21 +568,245 @@ export const deleteTransaction = async (
 ) => {
   const transactionId = req.params.id;
   try {
-    const { data: transaction, error } = await supabase
+    // First, fetch the transaction to get its details
+    const { data: transaction, error: fetchError } = await supabase
+      .from('Transaction')
+      .select('*')
+      .eq('id', transactionId)
+      .single();
+
+    if (fetchError || !transaction) {
+      console.error('Supabase error fetching transaction:', fetchError);
+      return res.status(400).json({ error: fetchError?.message || 'Transaction not found' });
+    }
+
+    // Skip balance reversal for request transactions
+    if (!transaction.isRequest) {
+      const amount = parseFloat(transaction.amount.toString());
+      
+      if (transaction.category === 'DEPOSIT') {
+        // For deposits: recipient (depositor) received the amount, so we deduct it
+        const recipientId = transaction.recipientId;
+        
+        // Get current recipient balance
+        const { data: recipientUser, error: recipientError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', recipientId)
+          .single();
+
+        if (recipientError) {
+          console.error('Supabase error fetching recipient balance:', recipientError);
+          return res.status(400).json({ error: recipientError.message });
+        }
+
+        // Deduct the amount from recipient (reversing the deposit)
+        const { error: recipientUpdateError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(recipientUser.accountBalance) - amount).toString()
+          })
+          .eq('id', recipientId);
+
+        if (recipientUpdateError) {
+          console.error('Supabase error updating recipient balance:', recipientUpdateError);
+          return res.status(400).json({ error: recipientUpdateError.message });
+        }
+      } else {
+        // For regular transactions: reverse the balance changes
+        // Recipient received amount, so deduct it
+        // Purchaser paid amount, so add it back
+        
+        // Get current balances
+        const { data: recipientUser, error: recipientError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', transaction.recipientId)
+          .single();
+
+        const { data: purchaserUser, error: purchaserError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', transaction.purchaserId)
+          .single();
+
+        if (recipientError || purchaserError) {
+          console.error('Supabase error fetching user balances:', recipientError || purchaserError);
+          return res.status(400).json({ error: (recipientError || purchaserError)?.message });
+        }
+
+        // Reverse recipient balance (deduct what was added)
+        const { error: recipientUpdateError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(recipientUser.accountBalance) - amount).toString()
+          })
+          .eq('id', transaction.recipientId);
+
+        if (recipientUpdateError) {
+          console.error('Supabase error updating recipient balance:', recipientUpdateError);
+          return res.status(400).json({ error: recipientUpdateError.message });
+        }
+
+        // Reverse purchaser balance (add back what was deducted)
+        const { error: purchaserUpdateError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(purchaserUser.accountBalance) + amount).toString()
+          })
+          .eq('id', transaction.purchaserId);
+
+        if (purchaserUpdateError) {
+          console.error('Supabase error updating purchaser balance:', purchaserUpdateError);
+          return res.status(400).json({ error: purchaserUpdateError.message });
+        }
+      }
+    }
+
+    // Now delete the transaction
+    const { data: deletedTransaction, error: deleteError } = await supabase
       .from('Transaction')
       .delete()
       .eq('id', transactionId)
       .select()
       .single();
 
-    if (error) {
-      console.error('Supabase error:', error);
-      return res.status(400).json({ error: error.message });
+    if (deleteError) {
+      console.error('Supabase error deleting transaction:', deleteError);
+      return res.status(400).json({ error: deleteError.message });
     }
 
-    res.status(200).send(transaction);
+    res.status(200).send(deletedTransaction);
   } catch (e: any) {
     console.error('Error in deleteTransaction:', e);
+    res.status(400).json({ error: e.message });
+  }
+};
+
+export const updateTransaction = async (
+  req: RequestBody<{ id: string; amount: number; reason?: string }>,
+  res: Response
+) => {
+  const { id, amount, reason } = req.body;
+  
+  try {
+    // First, fetch the existing transaction
+    const { data: existingTransaction, error: fetchError } = await supabase
+      .from('Transaction')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existingTransaction) {
+      console.error('Supabase error fetching transaction:', fetchError);
+      return res.status(400).json({ error: fetchError?.message || 'Transaction not found' });
+    }
+
+    const oldAmount = parseFloat(existingTransaction.amount.toString());
+    const newAmount = parseFloat(amount.toString());
+    const amountDifference = newAmount - oldAmount;
+
+    // Skip balance updates for request transactions
+    if (!existingTransaction.isRequest) {
+      if (existingTransaction.category === 'DEPOSIT') {
+        // For deposits: adjust recipient balance
+        const recipientId = existingTransaction.recipientId;
+        
+        // Get current recipient balance
+        const { data: recipientUser, error: recipientError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', recipientId)
+          .single();
+
+        if (recipientError) {
+          console.error('Supabase error fetching recipient balance:', recipientError);
+          return res.status(400).json({ error: recipientError.message });
+        }
+
+        // Adjust balance by the difference
+        const { error: recipientUpdateError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(recipientUser.accountBalance) + amountDifference).toString()
+          })
+          .eq('id', recipientId);
+
+        if (recipientUpdateError) {
+          console.error('Supabase error updating recipient balance:', recipientUpdateError);
+          return res.status(400).json({ error: recipientUpdateError.message });
+        }
+      } else {
+        // For regular transactions: adjust both recipient and purchaser balances
+        const amountDiff = amountDifference;
+        
+        // Get current balances
+        const { data: recipientUser, error: recipientError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', existingTransaction.recipientId)
+          .single();
+
+        const { data: purchaserUser, error: purchaserError } = await supabase
+          .from('User')
+          .select('accountBalance')
+          .eq('id', existingTransaction.purchaserId)
+          .single();
+
+        if (recipientError || purchaserError) {
+          console.error('Supabase error fetching user balances:', recipientError || purchaserError);
+          return res.status(400).json({ error: (recipientError || purchaserError)?.message });
+        }
+
+        // Adjust recipient balance (add difference)
+        const { error: recipientUpdateError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(recipientUser.accountBalance) + amountDiff).toString()
+          })
+          .eq('id', existingTransaction.recipientId);
+
+        if (recipientUpdateError) {
+          console.error('Supabase error updating recipient balance:', recipientUpdateError);
+          return res.status(400).json({ error: recipientUpdateError.message });
+        }
+
+        // Adjust purchaser balance (subtract difference - opposite of recipient)
+        const { error: purchaserUpdateError } = await supabase
+          .from('User')
+          .update({
+            accountBalance: (parseFloat(purchaserUser.accountBalance) - amountDiff).toString()
+          })
+          .eq('id', existingTransaction.purchaserId);
+
+        if (purchaserUpdateError) {
+          console.error('Supabase error updating purchaser balance:', purchaserUpdateError);
+          return res.status(400).json({ error: purchaserUpdateError.message });
+        }
+      }
+    }
+
+    // Update the transaction
+    const updateData: any = { amount: newAmount };
+    if (reason !== undefined) {
+      updateData.reason = reason;
+    }
+
+    const { data: updatedTransaction, error: updateError } = await supabase
+      .from('Transaction')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Supabase error updating transaction:', updateError);
+      return res.status(400).json({ error: updateError.message });
+    }
+
+    res.status(200).send(updatedTransaction);
+  } catch (e: any) {
+    console.error('Error in updateTransaction:', e);
     res.status(400).json({ error: e.message });
   }
 }

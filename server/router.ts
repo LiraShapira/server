@@ -24,7 +24,9 @@ import {
   saveNewTransaction,
   saveDeposit,
   transactionStats,
-  handleRequest
+  handleRequest,
+  deleteTransaction,
+  updateTransaction
 } from './controllers/transactions';
 import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin } from './controllers/compostStandAdmins';
 import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
@@ -84,6 +86,8 @@ router.get('/transactions', getAllTransactions);
 router.post('/saveTransaction', saveNewTransaction);
 router.post('/deposit', saveDeposit);
 router.put('/handleRequest', handleRequest);
+router.delete('/transaction/:id', deleteTransaction);
+router.put('/transaction', updateTransaction);
 
 // COMPOST REPORTS 
 router.get("/getCompostReports", getCompostReports);
