@@ -41,12 +41,12 @@ export async function addCompostStandAdmin(req: Request<CompostStandAdminsReq>, 
             return res.status(400).json({ error: updateError.message });
         }
 
-        // Fetch the updated compost stand with all admins
+        // Fetch the updated compost stand with all admins (specify the relationship explicitly)
         const { data: updatedStand, error: fetchError } = await supabase
             .from('CompostStand')
             .select(`
                 *,
-                admins:User(*)
+                admins:User!User_adminCompostStandId_fkey(*)
             `)
             .eq('compostStandId', compostStandId)
             .single();
