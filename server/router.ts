@@ -34,6 +34,7 @@ import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin
 import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
 import { checkVerify, startVerify } from './controllers/twilio';
 import { checkDatabaseHealth } from './utils/healthCheck';
+import { getVerificationMessage } from './controllers/verificationMessages';
 
 const router = Router();
 
@@ -99,6 +100,9 @@ router.get("/getCompostReports", getCompostReports);
 // TWILIO
 router.post('/startVerify', startVerify);
 router.post('/checkVerify', checkVerify);
+
+// VERIFICATION MESSAGES
+router.get('/verificationMessage', getVerificationMessage);
 
 // EVENTS
 router.get('/allEvents', getAllEvents);
