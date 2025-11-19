@@ -18,16 +18,19 @@ export const startVerify = async (req: RequestBody<StartVerifyRequest>, res: Res
       body: data
     });
 
+    // Read response body as text first (can only be read once)
+    const responseText = await response.text();
+
     // Check if response is OK before parsing JSON
     if (!response.ok) {
       let errorMessage = `Twilio API error: ${response.status} ${response.statusText}`;
       try {
-        const errorJson = await response.json();
+        // Try to parse as JSON to get structured error
+        const errorJson = JSON.parse(responseText);
         errorMessage = errorJson.message || errorJson.error || errorMessage;
       } catch {
-        // If error response is not JSON, use the status text
-        const errorText = await response.text();
-        errorMessage = errorText || errorMessage;
+        // If not JSON, use the raw text
+        errorMessage = responseText || errorMessage;
       }
       return res.status(400).json({ 
         success: false, 
@@ -35,7 +38,8 @@ export const startVerify = async (req: RequestBody<StartVerifyRequest>, res: Res
       });
     }
 
-    const json: TwilioStartVerifyResponse = await response.json();
+    // Parse the successful response as JSON
+    const json: TwilioStartVerifyResponse = JSON.parse(responseText);
     res.status(200).json(json);
   } catch (e: any) {
     console.error('Error in startVerify:', e);
@@ -61,16 +65,19 @@ export const checkVerify = async (req: RequestBody<CheckVerifyRequest>, res: Res
       body: data,
     });
 
+    // Read response body as text first (can only be read once)
+    const responseText = await response.text();
+
     // Check if response is OK before parsing JSON
     if (!response.ok) {
       let errorMessage = `Twilio API error: ${response.status} ${response.statusText}`;
       try {
-        const errorJson = await response.json();
+        // Try to parse as JSON to get structured error
+        const errorJson = JSON.parse(responseText);
         errorMessage = errorJson.message || errorJson.error || errorMessage;
       } catch {
-        // If error response is not JSON, use the status text
-        const errorText = await response.text();
-        errorMessage = errorText || errorMessage;
+        // If not JSON, use the raw text
+        errorMessage = responseText || errorMessage;
       }
       return res.status(400).json({ 
         success: false, 
@@ -78,7 +85,8 @@ export const checkVerify = async (req: RequestBody<CheckVerifyRequest>, res: Res
       });
     }
 
-    const json: TwilioCheckVerifyResponse = await response.json();
+    // Parse the successful response as JSON
+    const json: TwilioCheckVerifyResponse = JSON.parse(responseText);
     res.status(200).json(json);
   } catch (e: any) {
     console.error('Error in checkVerify:', e);
