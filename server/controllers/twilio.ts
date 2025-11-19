@@ -10,7 +10,6 @@ export const startVerify = async (req: RequestBody<StartVerifyRequest>, res: Res
   });
 
   try {
-
     const response = await fetch(`${process.env.TWILIO_URL}/start-verify`, {
       method: "POST",
       headers: {
@@ -18,12 +17,32 @@ export const startVerify = async (req: RequestBody<StartVerifyRequest>, res: Res
       },
       body: data
     });
-    const json: TwilioStartVerifyResponse = await response.json();
 
-    res.status(200).send(json);
-  } catch (e) {
-    console.log(e);
-    res.status(400).send(e);
+    // Check if response is OK before parsing JSON
+    if (!response.ok) {
+      let errorMessage = `Twilio API error: ${response.status} ${response.statusText}`;
+      try {
+        const errorJson = await response.json();
+        errorMessage = errorJson.message || errorJson.error || errorMessage;
+      } catch {
+        // If error response is not JSON, use the status text
+        const errorText = await response.text();
+        errorMessage = errorText || errorMessage;
+      }
+      return res.status(400).json({ 
+        success: false, 
+        error: errorMessage 
+      });
+    }
+
+    const json: TwilioStartVerifyResponse = await response.json();
+    res.status(200).json(json);
+  } catch (e: any) {
+    console.error('Error in startVerify:', e);
+    res.status(500).json({ 
+      success: false, 
+      error: e.message || 'Failed to send verification code' 
+    });
   }
 }
 
@@ -42,10 +61,30 @@ export const checkVerify = async (req: RequestBody<CheckVerifyRequest>, res: Res
       body: data,
     });
 
-    const json: TwilioCheckVerifyResponse = await response.json();
+    // Check if response is OK before parsing JSON
+    if (!response.ok) {
+      let errorMessage = `Twilio API error: ${response.status} ${response.statusText}`;
+      try {
+        const errorJson = await response.json();
+        errorMessage = errorJson.message || errorJson.error || errorMessage;
+      } catch {
+        // If error response is not JSON, use the status text
+        const errorText = await response.text();
+        errorMessage = errorText || errorMessage;
+      }
+      return res.status(400).json({ 
+        success: false, 
+        error: errorMessage 
+      });
+    }
 
-    res.status(200).send(json);
-  } catch (e) {
-    console.log(e)
+    const json: TwilioCheckVerifyResponse = await response.json();
+    res.status(200).json(json);
+  } catch (e: any) {
+    console.error('Error in checkVerify:', e);
+    res.status(500).json({ 
+      success: false, 
+      error: e.message || 'Failed to verify code' 
+    });
   }
 }
