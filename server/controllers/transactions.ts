@@ -362,10 +362,11 @@ export const saveDeposit = async (
       return res.status(400).json({ error: depositorUpdateError.message });
     }
 
-    // create compost report
+    // create compost report - pass the compostStandId we already looked up
+    const reportData = convertDepositDTOToCompostReportData(body, compostStandId);
     const { error: reportError } = await supabase
       .from('CompostReport')
-      .insert(convertDepositDTOToCompostReportData(body));
+      .insert(reportData);
 
     if (reportError) {
       console.error('Supabase error creating compost report:', reportError);

@@ -25,7 +25,7 @@ export const convertUserWithTransactionsCountToCountArray = (userWithTransaction
     return userWithTransactionsCount.map(n => n._count.transactions);
 }
 
-export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): any => {
+export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO, compostStandId?: number): any => {
     const { compostReport, userId } = depositDTO;
     const {
         compostStand,
@@ -39,6 +39,15 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): an
         compostSmell,
     } = compostReport;
 
+    // Use provided compostStandId if available, otherwise fall back to hardcoded map
+    const standId = compostStandId !== undefined 
+        ? compostStandId 
+        : standsNameToIdMap[compostStand];
+
+    if (standId === undefined) {
+        throw new Error(`Compost stand "${compostStand}" not found and no ID provided`);
+    }
+
     return {
         compostReportId: randomUUID(),
         depositWeight: depositWeight.toString(),
@@ -50,7 +59,7 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO): an
         full,
         cleanAndTidy,
         compostSmell,
-        compostStandId: standsNameToIdMap[compostStand],
+        compostStandId: standId,
         userId,
     };
 };
