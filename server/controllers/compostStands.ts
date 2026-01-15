@@ -33,16 +33,46 @@ export const addMultipleCompostStands = async (
 };
 
 export const addCompostStand = async (
-  req: RequestBody<CompostStandReqObject>,
+  req: RequestBody<{ name_en: string; name_he: string; compostStandId?: number }>,
   res: Response
 ) => {
-  const { compostStandId, name } = req.body;
+  const { name_en, name_he, compostStandId } = req.body;
+  
+  if (!name_en || !name_he) {
+    return res.status(400).json({ error: 'name_en and name_he are required' });
+  }
+
+  // Generate name from name_en: replace spaces with underscores and convert to lowercase
+  const name = name_en.toLowerCase().replace(/\s+/g, '_');
+
   try {
+    // If compostStandId is not provided, get the next available ID
+    let standId = compostStandId;
+    if (!standId) {
+      const { data: existingStands, error: fetchError } = await supabase
+        .from('CompostStand')
+        .select('compostStandId')
+        .order('compostStandId', { ascending: false })
+        .limit(1);
+
+      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+        console.error('Supabase error fetching max ID:', fetchError);
+        return res.status(500).json({ error: fetchError.message });
+      }
+
+      standId = existingStands && existingStands.length > 0 
+        ? existingStands[0].compostStandId + 1 
+        : 1;
+    }
+
     const { data: stand, error } = await supabase
       .from('CompostStand')
       .insert({
-        compostStandId: compostStandId,
+        compostStandId: standId,
         name,
+        name_en,
+        name_he,
+        isActive: true, // New stands are active by default
       })
       .select()
       .single();
@@ -59,22 +89,93 @@ export const addCompostStand = async (
   }
 };
 
-export const getCompostStands = async (_req: Request, res: Response) => {
+export const updateCompostStand = async (
+  req: RequestBody<{ compostStandId: number; name_he?: string; name_en?: string; isActive?: boolean }>,
+  res: Response
+) => {
+  const { compostStandId, name_he, name_en, isActive } = req.body;
+  
+  if (!compostStandId) {
+    return res.status(400).json({ error: 'compostStandId is required' });
+  }
+
+  const updates: any = {};
+  if (name_he !== undefined) updates.name_he = name_he;
+  if (name_en !== undefined) {
+    updates.name_en = name_en;
+    // Update name if name_en changes
+    updates.name = name_en.toLowerCase().replace(/\s+/g, '_');
+  }
+  if (isActive !== undefined) updates.isActive = isActive;
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+
   try {
-    const { data: stands, error } = await supabase
+    const { data: stand, error } = await supabase
+      .from('CompostStand')
+      .update(updates)
+      .eq('compostStandId', compostStandId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(200).send(stand);
+  } catch (e: any) {
+    console.error('Error in updateCompostStand:', e);
+    res.status(400).json({ error: e.message });
+  }
+};
+
+export const getCompostStands = async (req: Request, res: Response) => {
+  try {
+    const locale = (req.query.locale as string) || 'he'; // Default to Hebrew
+    const includeInactive = req.query.includeInactive === 'true' || req.query.includeInactive === '1';
+    
+    let query = supabase
       .from('CompostStand')
       .select(`
-        *,
+        compostStandId,
+        name,
+        name_he,
+        name_en,
+        isActive,
         reports:CompostReport(*),
         admins:User!User_adminCompostStandId_fkey(*)
       `);
+
+    // Filter by isActive unless includeInactive is true (for admin)
+    if (!includeInactive) {
+      query = query.eq('isActive', true);
+    }
+
+    const { data: stands, error } = await query.order('compostStandId', { ascending: true });
 
     if (error) {
       console.error('Supabase error:', error);
       return res.status(500).json({ error: error.message });
     }
 
-    res.status(200).send(stands);
+    // Map stands to include localized display name
+    const standsWithLocalizedNames = stands.map(stand => {
+      // Handle locale: 'iw' is also Hebrew, 'en' is English
+      const isEnglish = locale === 'en';
+      const displayName = isEnglish 
+        ? (stand.name_en || stand.name || 'Unknown')
+        : (stand.name_he || stand.name_en || stand.name || 'Unknown');
+      
+      return {
+        ...stand,
+        displayName,
+      };
+    });
+
+    res.status(200).send(standsWithLocalizedNames);
   } catch (e: any) {
     console.error('Error in getCompostStands:', e);
     res.status(500).json({ error: e.message });
@@ -281,12 +382,25 @@ export const compostStandStats = async (req: Request, res: Response) => {
       standStats[standId].weights.push(weight);
     });
 
+    // Fetch all stands to get names
+    const { data: allStands, error: standsError } = await supabase
+      .from('CompostStand')
+      .select('compostStandId, name');
+    
+    const standIdToNameMap: Record<number, string> = {};
+    if (!standsError && allStands) {
+      allStands.forEach(stand => {
+        standIdToNameMap[stand.compostStandId] = stand.name;
+      });
+    }
+
     const depositsWeightsByStands = Object.entries(standStats).map(([standId, stats]) => {
       const averageWeight = stats.count > 0 ? Number((stats.sum / stats.count).toFixed(2)) : 0;
+      const standIdNum = parseInt(standId);
       
       return {
         id: standId,
-        name: standsIdToNameMap[parseInt(standId)],
+        name: standIdToNameMap[standIdNum] || standsIdToNameMap[standIdNum] || `stand_${standId}`, // Fallback to hardcoded map, then generic name
         depositWeightSum: Number(stats.sum.toFixed(2)),
         averageDepositWeight: averageWeight,
         depositCount: stats.count

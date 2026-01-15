@@ -148,7 +148,32 @@ export const saveDeposit = async (
 ) => {
   const netGained = parseFloat(body.compostReport.depositWeight.toString());
   const tenPercent = netGained * 0.1;
-  const compostStandId = standsNameToIdMap[body.compostReport.compostStand];
+  
+  // Fetch stand ID from database using the name
+  let compostStandId: number | undefined;
+  try {
+    const { data: stand, error: standLookupError } = await supabase
+      .from('CompostStand')
+      .select('compostStandId')
+      .eq('name', body.compostReport.compostStand)
+      .single();
+
+    if (standLookupError || !stand) {
+      // Fallback to hardcoded map for backward compatibility
+      compostStandId = standsNameToIdMap[body.compostReport.compostStand];
+      if (!compostStandId) {
+        return res.status(400).json({ error: `Compost stand "${body.compostReport.compostStand}" not found` });
+      }
+    } else {
+      compostStandId = stand.compostStandId;
+    }
+  } catch (e: any) {
+    // Fallback to hardcoded map for backward compatibility
+    compostStandId = standsNameToIdMap[body.compostReport.compostStand];
+    if (!compostStandId) {
+      return res.status(400).json({ error: `Compost stand "${body.compostReport.compostStand}" not found` });
+    }
+  }
 
   try {
     const orgId = process.env.LIRA_SHAPIRA_USER_ID;

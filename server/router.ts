@@ -13,6 +13,7 @@ import {
 import {
   addMultipleCompostStands,
   addCompostStand,
+  updateCompostStand,
   deleteAllCompostStands,
   getCompostStands,
   setUsersLocalStand,
@@ -80,6 +81,7 @@ router.post('/toggleBanUser', toggleBanUser);
 // COMPOST STAND OPERATIONS
 router.get('/compostStands', getCompostStands);
 router.post('/compostStand', addCompostStand);
+router.put('/compostStand', updateCompostStand);
 router.post('/setUsersLocalStand', setUsersLocalStand);
 
 router.get('/getAllCompostStandAdmins', getAllCompostStandAdmins);
