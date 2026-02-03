@@ -10,29 +10,34 @@ import { randomUUID } from 'crypto';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
-export const getAllUsers = async (_req: Request, res: Response) => {
+export const getAllUsers = async (req: Request, res: Response) => {
   try {
-    const { data: users, error } = await supabase
+    const communityId = req.query.communityId as string | undefined;
+    let query = supabase
       .from('User')
       .select(`
         *,
         transactions:Transaction(*)
       `);
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: users, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Failed to fetch users',
-        message: error.message 
+        message: error.message,
       });
     }
 
     res.json(users);
   } catch (error: any) {
     console.error('Error in getAllUsers:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to fetch users',
-      message: error.message 
+      message: error.message,
     });
   }
 };
@@ -63,8 +68,15 @@ export const saveNewUser = async (
   req: RequestBody<userReqObject>,
   res: Response
 ) => {
-  const { firstName, lastName, phoneNumber, email } = req.body;
-  
+  const { firstName, lastName, phoneNumber, email, communityId } = req.body;
+
+  if (!firstName || !lastName) {
+    return res.status(400).json({ error: 'firstName and lastName are required for registration' });
+  }
+  if (!communityId) {
+    return res.status(400).json({ error: 'communityId is required for registration' });
+  }
+
   try {
     const { data: user, error } = await supabase
       .from('User')
@@ -73,6 +85,7 @@ export const saveNewUser = async (
         firstName,
         lastName,
         phoneNumber,
+        communityId,
         ...(email && { email }),
       })
       .select(`
@@ -86,7 +99,16 @@ export const saveNewUser = async (
       return res.status(400).json({ error: error.message });
     }
 
-    res.status(200).send(user);
+    let communityCoin: string | null = null;
+    if (communityId) {
+      const { data: community } = await supabase
+        .from('Community')
+        .select('Coin, coin')
+        .eq('id', communityId)
+        .single();
+      communityCoin = (community as any)?.Coin ?? (community as any)?.coin ?? null;
+    }
+    res.status(200).send({ ...user, communityCoin });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
@@ -161,10 +183,22 @@ export const getUser = async (
       return { ...t, users };
     });
 
-    // 5) Return the user merged with transactions
+    // 5) Optionally fetch community for coin name
+    let communityCoin: string | null = null;
+    if (baseUser.communityId) {
+      const { data: community } = await supabase
+        .from('Community')
+        .select('Coin, coin')
+        .eq('id', baseUser.communityId)
+        .single();
+      communityCoin = (community as any)?.Coin ?? (community as any)?.coin ?? null;
+    }
+
+    // 6) Return the user merged with transactions and communityCoin
     const responseUser = {
       ...baseUser,
       transactions: transactionsWithUsers,
+      ...(communityCoin != null && { communityCoin }),
     };
 
     res.status(200).send(responseUser);
@@ -193,7 +227,7 @@ interface userStatsRes {
  * balanceCounts: represents spread of balances in the user pool
  */
 export const userStats = async (
-  req: Request<{ period?: string }>,
+  req: Request<{ period?: string; communityId?: string }>,
   res: Response<userStatsRes | ErrorRes>
 ) => {
   try {
@@ -201,15 +235,20 @@ export const userStats = async (
     if (req.query.period && typeof req.query.period === 'string') {
       period = parseInt(req.query.period);
     }
+    const communityId = req.query.communityId as string | undefined;
 
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - period);
 
-    // Get all users
-    const { data: users, error: usersError } = await supabase
+    // Get users (optionally filtered by community)
+    let usersQuery = supabase
       .from('User')
       .select('id, accountBalance, createdAt');
+    if (communityId) {
+      usersQuery = usersQuery.eq('communityId', communityId);
+    }
+    const { data: users, error: usersError } = await usersQuery;
 
     if (usersError) {
       console.error('Supabase error fetching users:', usersError);
@@ -220,16 +259,20 @@ export const userStats = async (
     const userCount = users?.length || 0;
 
     // Get new users in the period
-    const newUserCount = users?.filter(user => 
+    const newUserCount = users?.filter(user =>
       new Date(user.createdAt) >= startDate
     ).length || 0;
 
-    // Get transactions within the period
-    const { data: transactions, error: transactionsError } = await supabase
+    // Get transactions within the period (optionally by community)
+    let transactionsQuery = supabase
       .from('Transaction')
       .select('purchaserId, recipientId, createdAt')
       .gte('createdAt', startDate.toISOString())
       .lte('createdAt', endDate.toISOString());
+    if (communityId) {
+      transactionsQuery = transactionsQuery.eq('communityId', communityId);
+    }
+    const { data: transactions, error: transactionsError } = await transactionsQuery;
 
     if (transactionsError) {
       console.error('Supabase error fetching transactions:', transactionsError);
@@ -256,13 +299,17 @@ export const userStats = async (
       ? transactionsPerUser.reduce((a, b) => a + b, 0) / transactionsPerUser.length 
       : 0;
 
-    // Get deposits within the period
-    const { data: deposits, error: depositsError } = await supabase
+    // Get deposits within the period (optionally by community)
+    let depositsQuery = supabase
       .from('Transaction')
       .select('purchaserId, recipientId, createdAt')
       .eq('category', 'DEPOSIT')
       .gte('createdAt', startDate.toISOString())
       .lte('createdAt', endDate.toISOString());
+    if (communityId) {
+      depositsQuery = depositsQuery.eq('communityId', communityId);
+    }
+    const { data: deposits, error: depositsError } = await depositsQuery;
 
     if (depositsError) {
       console.error('Supabase error fetching deposits:', depositsError);
@@ -283,11 +330,15 @@ export const userStats = async (
 
     const depositsPerUser = Object.values(depositCounts).filter(count => count > 0);
 
-    // Get all transaction amounts for total coins
-    const { data: allTransactions, error: allTransactionsError } = await supabase
+    // Get all transaction amounts for total coins (optionally by community)
+    let allTxQuery = supabase
       .from('Transaction')
       .select('amount')
       .eq('category', 'DEPOSIT');
+    if (communityId) {
+      allTxQuery = allTxQuery.eq('communityId', communityId);
+    }
+    const { data: allTransactions, error: allTransactionsError } = await allTxQuery;
 
     if (allTransactionsError) {
       console.error('Supabase error fetching all transactions:', allTransactionsError);

@@ -10,11 +10,14 @@ import { randomUUID } from 'crypto';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
-export const getAllTransactions = async (_req: Request, res: Response) => {
+export const getAllTransactions = async (req: Request, res: Response) => {
   try {
-    const { data: transactions, error } = await supabase
-      .from('Transaction')
-      .select('*');
+    const communityId = req.query.communityId as string | undefined;
+    let query = supabase.from('Transaction').select('*');
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: transactions, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
@@ -42,18 +45,24 @@ export const saveNewTransaction = async (
       transaction.recipientPhoneNumber
     );
 
+    const communityId = (transaction as any).communityId ?? null;
+
     // Create the transaction
+    const insertPayload: Record<string, unknown> = {
+      id: randomUUID(),
+      category: transaction.category,
+      amount: transaction.amount,
+      purchaserId: transaction.purchaserId,
+      reason: transaction.reason,
+      recipientId,
+      isRequest: transaction.isRequest,
+    };
+    if (communityId) {
+      insertPayload.communityId = communityId;
+    }
     const { data: newTransaction, error: transactionError } = await supabase
       .from('Transaction')
-      .insert({
-        id: randomUUID(),
-        category: transaction.category,
-        amount: transaction.amount,
-        purchaserId: transaction.purchaserId,
-        reason: transaction.reason,
-        recipientId,
-        isRequest: transaction.isRequest,
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
@@ -176,27 +185,12 @@ export const saveDeposit = async (
   }
 
   try {
-    const orgId = process.env.LIRA_SHAPIRA_USER_ID;
-    if (!orgId) {
-      throw new Error('no lira shapira user id available');
-    }
+    const orgIdFallback = process.env.LIRA_SHAPIRA_USER_ID;
 
-    // Check if the organization user exists
-    const { data: orgUserCheck, error: orgUserCheckError } = await supabase
-      .from('User')
-      .select('id')
-      .eq('id', orgId)
-      .single();
-
-    if (orgUserCheckError || !orgUserCheck) {
-      console.error('Organization user not found:', orgId);
-      return res.status(400).json({ error: 'Organization user not found in database' });
-    }
-
-    // Check if the depositor user exists
+    // Check if the depositor user exists and get their communityId
     const { data: depositorUserCheck, error: depositorUserCheckError } = await supabase
       .from('User')
-      .select('id')
+      .select('id, communityId')
       .eq('id', body.userId)
       .single();
 
@@ -205,17 +199,50 @@ export const saveDeposit = async (
       return res.status(400).json({ error: 'Depositor user not found in database' });
     }
 
+    const depositorCommunityId = depositorUserCheck.communityId ?? null;
+    let orgIdToUse: string | null = orgIdFallback ?? null;
+    if (depositorCommunityId) {
+      const { data: community } = await supabase
+        .from('Community')
+        .select('orgUserId')
+        .eq('id', depositorCommunityId)
+        .single();
+      const communityOrgId = (community as any)?.orgUserId ?? (community as any)?.orguserid;
+      if (communityOrgId) {
+        orgIdToUse = communityOrgId;
+      }
+    }
+    if (!orgIdToUse) {
+      return res.status(400).json({ error: 'No organization user configured for this community. Set Community.orgUserId or LIRA_SHAPIRA_USER_ID.' });
+    }
+
+    // Check if the organization user exists (use orgIdToUse)
+    const { data: orgUserCheck, error: orgUserCheckError } = await supabase
+      .from('User')
+      .select('id')
+      .eq('id', orgIdToUse)
+      .single();
+
+    if (orgUserCheckError || !orgUserCheck) {
+      console.error('Organization user not found:', orgIdToUse);
+      return res.status(400).json({ error: 'Organization user not found in database' });
+    }
+
     // create main transaction for depositor (org as purchaser)
+    const mainTxnPayload: Record<string, unknown> = {
+      id: randomUUID(),
+      amount: netGained,
+      category: 'DEPOSIT',
+      purchaserId: orgIdToUse,
+      recipientId: body.userId,
+      reason: 'Deposit',
+    };
+    if (depositorCommunityId) {
+      mainTxnPayload.communityId = depositorCommunityId;
+    }
     const { data: mainTransaction, error: mainTransactionError } = await supabase
       .from('Transaction')
-      .insert({
-        id: randomUUID(),
-        amount: netGained,
-        category: 'DEPOSIT',
-        purchaserId: orgId,
-        recipientId: body.userId,
-        reason: 'Deposit',
-      })
+      .insert(mainTxnPayload)
       .select()
       .single();
 
@@ -228,7 +255,7 @@ export const saveDeposit = async (
     const { data: orgUser, error: orgUserError } = await supabase
       .from('User')
       .select('firstName, lastName')
-      .eq('id', orgId)
+      .eq('id', orgIdToUse)
       .single();
 
     const { data: depositorUser, error: depositorUserError } = await supabase
@@ -304,16 +331,20 @@ export const saveDeposit = async (
         }
 
         // record admin transaction (user as purchaser)
+        const adminTxnPayload: Record<string, unknown> = {
+          id: randomUUID(),
+          amount: share,
+          category: 'DEPOSIT',
+          purchaserId: body.userId,
+          recipientId: admin.id,
+          reason: 'StandAdminPayment',
+        };
+        if (depositorCommunityId) {
+          adminTxnPayload.communityId = depositorCommunityId;
+        }
         const { data: adminTransaction, error: adminTransactionError } = await supabase
           .from('Transaction')
-          .insert({
-            id: randomUUID(),
-            amount: share,
-            category: 'DEPOSIT',
-            purchaserId: body.userId,
-            recipientId: admin.id,
-            reason: 'StandAdminPayment',
-          })
+          .insert(adminTxnPayload)
           .select()
           .single();
 
@@ -362,8 +393,8 @@ export const saveDeposit = async (
       return res.status(400).json({ error: depositorUpdateError.message });
     }
 
-    // create compost report - pass the compostStandId we already looked up
-    const reportData = convertDepositDTOToCompostReportData(body, compostStandId);
+    // create compost report - pass the compostStandId and communityId we already have
+    const reportData = convertDepositDTOToCompostReportData(body, compostStandId, depositorCommunityId);
     const { error: reportError } = await supabase
       .from('CompostReport')
       .insert(reportData);
@@ -520,19 +551,23 @@ export const transactionStats = async (req: Request, res: Response) => {
   if (req.query.period && typeof req.query.period === 'string') {
     period = parseInt(req.query.period);
   }
+  const communityId = req.query.communityId as string | undefined;
 
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(endDate.getDate() - period);
 
   try {
-    // Fetch transactions with required fields
-    const { data: transactions, error: transactionsError } = await supabase
+    let query = supabase
       .from('Transaction')
       .select('id, recipientId, purchaserId, category, amount, createdAt, reason, isRequest')
       .gte('createdAt', startDate.toISOString())
       .lte('createdAt', endDate.toISOString())
       .eq('isRequest', false);
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: transactions, error: transactionsError } = await query;
 
     if (transactionsError) {
       console.error('Supabase error fetching transactions:', transactionsError);

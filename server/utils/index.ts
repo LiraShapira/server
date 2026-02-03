@@ -25,7 +25,11 @@ export const convertUserWithTransactionsCountToCountArray = (userWithTransaction
     return userWithTransactionsCount.map(n => n._count.transactions);
 }
 
-export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO, compostStandId?: number): any => {
+export const convertDepositDTOToCompostReportData = (
+    depositDTO: DepositDTO,
+    compostStandId?: number,
+    communityId?: string | null
+): any => {
     const { compostReport, userId } = depositDTO;
     const {
         compostStand,
@@ -40,15 +44,15 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO, com
     } = compostReport;
 
     // Use provided compostStandId if available, otherwise fall back to hardcoded map
-    const standId = compostStandId !== undefined 
-        ? compostStandId 
+    const standId = compostStandId !== undefined
+        ? compostStandId
         : standsNameToIdMap[compostStand];
 
     if (standId === undefined) {
         throw new Error(`Compost stand "${compostStand}" not found and no ID provided`);
     }
 
-    return {
+    const data: any = {
         compostReportId: randomUUID(),
         depositWeight: depositWeight.toString(),
         dryMatterPresent:
@@ -62,6 +66,10 @@ export const convertDepositDTOToCompostReportData = (depositDTO: DepositDTO, com
         compostStandId: standId,
         userId,
     };
+    if (communityId) {
+        data.communityId = communityId;
+    }
+    return data;
 };
 
 export const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

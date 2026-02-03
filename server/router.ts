@@ -36,6 +36,7 @@ import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, ge
 import { checkVerify, startVerify } from './controllers/twilio';
 import { checkDatabaseHealth } from './utils/healthCheck';
 import { getVerificationMessage } from './controllers/verificationMessages';
+import { getCommunities, getCommunityById } from './controllers/communities';
 
 const router = Router();
 
@@ -69,6 +70,10 @@ router.get('/health', async (req, res) => {
     });
   }
 });
+
+// COMMUNITIES
+router.get('/communities', getCommunities);
+router.get('/community/:id', getCommunityById);
 
 // USER OPERATIONS
 router.get('/users', getAllUsers);

@@ -30,6 +30,7 @@ export interface User {
 
 export type TransactionDTO = Pick<Transaction, 'category' | 'amount' | 'purchaserId' | 'reason' | 'isRequest'> & {
   recipientPhoneNumber: string;
+  communityId?: string;
 };
 
 export interface DepositDTO {

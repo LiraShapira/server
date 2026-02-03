@@ -124,21 +124,26 @@ export async function removeCompostStandAdmin(req: Request<CompostStandAdminsReq
     }
 }
 
-export async function getAllCompostStandAdmins(_req: Request, res: Response) {
+export async function getAllCompostStandAdmins(req: Request, res: Response) {
     try {
-        const { data: allCompostStandsWithAdmins, error } = await supabase
+        const communityId = req.query.communityId as string | undefined;
+        let query = supabase
             .from('CompostStand')
             .select(`
                 *,
                 admins:User!User_adminCompostStandId_fkey(*)
             `);
+        if (communityId) {
+            query = query.eq('communityId', communityId);
+        }
+        const { data: allCompostStandsWithAdmins, error } = await query;
 
         if (error) {
             console.error('Supabase error:', error);
             return res.status(500).json({ error: error.message });
         }
 
-        const allAdmins = allCompostStandsWithAdmins.flatMap((stand: any) => stand.admins || []);
+        const allAdmins = (allCompostStandsWithAdmins || []).flatMap((stand: any) => stand.admins || []);
         res.status(200).send(allAdmins);
     } catch (error: any) {
         console.error('Error retrieving all CompostStand admins:', error);

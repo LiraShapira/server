@@ -1,13 +1,17 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
 
-export const getVerificationMessage = async (_req: Request, res: Response) => {
+export const getVerificationMessage = async (req: Request, res: Response) => {
   try {
-    const { data: verificationMessage, error } = await supabase
-      .from('verification_messages')
-      .select('message')
-      .eq('community_name', 'lira_shapira')
-      .single();
+    const communityId = req.query.communityId as string | undefined;
+    let query = supabase.from('verification_messages').select('message');
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    } else {
+      // Fallback for backward compatibility when table has community_name
+      query = query.eq('community_name', 'lira_shapira');
+    }
+    const { data: verificationMessage, error } = await query.single();
 
     if (error) {
       if (error.code === 'PGRST116') {

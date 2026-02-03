@@ -7,13 +7,14 @@ import { months } from '../utils';
 type RequestBody<T> = Request<{}, {}, T>;
 
 export const addMultipleCompostStands = async (
-  req: RequestBody<CompostStandReqObject[]>,
+  req: RequestBody<(CompostStandReqObject & { communityId?: string })[]>,
   res: Response
 ) => {
   try {
     const stands = req.body.map(stand => ({
       compostStandId: stand.compostStandId,
       name: stand.name,
+      ...(stand.communityId && { communityId: stand.communityId }),
     }));
 
     const { error } = await supabase
@@ -33,13 +34,16 @@ export const addMultipleCompostStands = async (
 };
 
 export const addCompostStand = async (
-  req: RequestBody<{ name_en: string; name_he: string; compostStandId?: number }>,
+  req: RequestBody<{ name_en: string; name_he: string; compostStandId?: number; communityId: string }>,
   res: Response
 ) => {
-  const { name_en, name_he, compostStandId } = req.body;
-  
+  const { name_en, name_he, compostStandId, communityId } = req.body;
+
   if (!name_en || !name_he) {
     return res.status(400).json({ error: 'name_en and name_he are required' });
+  }
+  if (!communityId) {
+    return res.status(400).json({ error: 'communityId is required' });
   }
 
   // Generate name from name_en: replace spaces with underscores and convert to lowercase
@@ -73,6 +77,7 @@ export const addCompostStand = async (
         name_en,
         name_he,
         isActive: true, // New stands are active by default
+        communityId,
       })
       .select()
       .single();
@@ -136,7 +141,8 @@ export const getCompostStands = async (req: Request, res: Response) => {
   try {
     const locale = (req.query.locale as string) || 'he'; // Default to Hebrew
     const includeInactive = req.query.includeInactive === 'true' || req.query.includeInactive === '1';
-    
+    const communityId = req.query.communityId as string | undefined;
+
     let query = supabase
       .from('CompostStand')
       .select(`
@@ -149,6 +155,9 @@ export const getCompostStands = async (req: Request, res: Response) => {
         admins:User!User_adminCompostStandId_fkey(*)
       `);
 
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
     // Filter by isActive unless includeInactive is true (for admin)
     if (!includeInactive) {
       query = query.eq('isActive', true);
@@ -212,13 +221,18 @@ export async function setUsersLocalStand(
 
 export async function getCompostReports(req: Request, res: Response) {
   try {
-    const { data: reports, error } = await supabase
+    const communityId = req.query.communityId as string | undefined;
+    let query = supabase
       .from('CompostReport')
       .select(`
         *,
         compostStand:CompostStand(*),
         user:User(*)
       `);
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: reports, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
@@ -330,7 +344,8 @@ export const compostStandStats = async (req: Request, res: Response) => {
   }
   const debug = req.query.debug === '1' || req.query.debug === 'true';
   const includeOrg = req.query.includeOrg === '1' || req.query.includeOrg === 'true';
-  
+  const communityId = req.query.communityId as string | undefined;
+
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(endDate.getDate() - period);
@@ -340,6 +355,9 @@ export const compostStandStats = async (req: Request, res: Response) => {
       .from('CompostReport')
       .select('compostStandId, depositWeight, date, userId');
 
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
     if (!debug && !includeOrg) {
       query = query.neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
     }
@@ -424,14 +442,14 @@ export const getCompostReportsStats = async (req: Request, res: Response) => {
   if (req.query.period && typeof req.query.period === 'string') {
     period = parseInt(req.query.period, 10);
   }
+  const communityId = req.query.communityId as string | undefined;
 
   const now = new Date();
   const from = new Date(now);
   from.setDate(now.getDate() - period);
 
   try {
-    // Fetch all reports in period, including stand info
-    const { data: reports, error } = await supabase
+    let query = supabase
       .from('CompostReport')
       .select(`
         *,
@@ -439,6 +457,10 @@ export const getCompostReportsStats = async (req: Request, res: Response) => {
       `)
       .gte('date', from.toISOString())
       .lte('date', now.toISOString());
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: reports, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);

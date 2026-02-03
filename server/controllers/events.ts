@@ -10,11 +10,16 @@ interface EventDTO {
   endDate: string;
   title: string;
   description: string;
-  location: { id: string }
+  location: { id: string };
+  communityId: string;
 }
 
 export const addEvent = async (req: RequestBody<EventDTO>, res: Response) => {
   const reqEvent: EventDTO = req.body;
+
+  if (!reqEvent.communityId) {
+    return res.status(400).json({ error: 'communityId is required' });
+  }
 
   const luxonStartDateString = DateTime.fromISO(reqEvent.startDate).toString();
   const luxonEndDateString = DateTime.fromISO(reqEvent.endDate).toString();
@@ -26,7 +31,8 @@ export const addEvent = async (req: RequestBody<EventDTO>, res: Response) => {
     title: reqEvent.title,
     description: reqEvent.description,
     locationId: reqEvent.location.id,
-  }
+    communityId: reqEvent.communityId,
+  };
 
   try {
     const { data: event, error } = await supabase
@@ -144,9 +150,10 @@ export const removeAttendee = async (req: RequestBody<RemoveAttendeeArgs>, res: 
 }
 
 
-export const getAllEvents = async (_req: Request, res: Response) => {
+export const getAllEvents = async (req: Request, res: Response) => {
   try {
-    const { data: events, error } = await supabase
+    const communityId = req.query.communityId as string | undefined;
+    let query = supabase
       .from('Event')
       .select(`
         *,
@@ -156,6 +163,10 @@ export const getAllEvents = async (_req: Request, res: Response) => {
           user:User(*)
         )
       `);
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: events, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
@@ -167,11 +178,12 @@ export const getAllEvents = async (_req: Request, res: Response) => {
     console.error('Error in getAllEvents:', e);
     res.status(500).json({ error: e.message });
   }
-}
+};
 
-export const getUpcomingEvents = async (_req: RequestBody<any>, res: Response) => {
+export const getUpcomingEvents = async (req: RequestBody<any>, res: Response) => {
   try {
-    const { data: events, error } = await supabase
+    const communityId = req.query?.communityId as string | undefined;
+    let query = supabase
       .from('Event')
       .select(`
         *,
@@ -182,6 +194,10 @@ export const getUpcomingEvents = async (_req: RequestBody<any>, res: Response) =
         )
       `)
       .gte('endDate', new Date().toISOString());
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: events, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
@@ -193,13 +209,16 @@ export const getUpcomingEvents = async (_req: RequestBody<any>, res: Response) =
     console.error('Error in getUpcomingEvents:', e);
     res.status(500).json({ error: e.message });
   }
-}
+};
 
-export const getLocations = async (_req: Request, res: Response) => {
+export const getLocations = async (req: Request, res: Response) => {
   try {
-    const { data: locations, error } = await supabase
-      .from('Location')
-      .select('*');
+    const communityId = req.query.communityId as string | undefined;
+    let query = supabase.from('Location').select('*');
+    if (communityId) {
+      query = query.eq('communityId', communityId);
+    }
+    const { data: locations, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
@@ -211,7 +230,7 @@ export const getLocations = async (_req: Request, res: Response) => {
     console.error('Error in getLocations:', e);
     res.status(500).json({ error: e.message });
   }
-}
+};
 
 export const deleteEvent = async (req: RequestBody<{ id: string }>, res: Response) => {
   try {
