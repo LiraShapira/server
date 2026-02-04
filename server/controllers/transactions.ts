@@ -157,7 +157,8 @@ export const saveDeposit = async (
 ) => {
   const netGained = parseFloat(body.compostReport.depositWeight.toString());
   const tenPercent = netGained * 0.1;
-  
+  const depositorAmount = netGained - tenPercent; // User receives 90%; 10% goes to stand operator(s)
+
   // Fetch stand ID from database using the name
   let compostStandId: number | undefined;
   try {
@@ -228,10 +229,10 @@ export const saveDeposit = async (
       return res.status(400).json({ error: 'Organization user not found in database' });
     }
 
-    // create main transaction for depositor (org as purchaser)
+    // create main transaction for depositor (org as purchaser) — amount is 90% (after 10% operator fee)
     const mainTxnPayload: Record<string, unknown> = {
       id: randomUUID(),
-      amount: netGained,
+      amount: depositorAmount,
       category: 'DEPOSIT',
       purchaserId: orgIdToUse,
       recipientId: body.userId,
@@ -251,16 +252,16 @@ export const saveDeposit = async (
       return res.status(400).json({ error: mainTransactionError.message });
     }
 
-    // Get users for the main transaction
+    // Get users for the main transaction (include id so client can identify "other" user in list)
     const { data: orgUser, error: orgUserError } = await supabase
       .from('User')
-      .select('firstName, lastName')
+      .select('id, firstName, lastName')
       .eq('id', orgIdToUse)
       .single();
 
     const { data: depositorUser, error: depositorUserError } = await supabase
       .from('User')
-      .select('firstName, lastName')
+      .select('id, firstName, lastName')
       .eq('id', body.userId)
       .single();
 
@@ -276,11 +277,11 @@ export const saveDeposit = async (
       return [purchaser, recipient];
     };
 
-    // push main txn
+    // push main txn (amount is what depositor receives, i.e. 90%)
     responseTransactions.push({
       ...mainTransaction,
       users: normalizeUsers(orgUser, depositorUser),
-      amount: Number(netGained),
+      amount: Number(depositorAmount),
     });
 
     // fetch stand admins
@@ -373,14 +374,9 @@ export const saveDeposit = async (
       return res.status(400).json({ error: depositorBalanceError.message });
     }
 
-    // finalize depositor balance update
-    console.log('Updating depositor balance:');
-    console.log('Current balance:', depositorBalance.accountBalance, 'Type:', typeof depositorBalance.accountBalance);
-    console.log('Net gained:', netGained, 'Type:', typeof netGained);
-    console.log('Number(netGained):', Number(netGained));
-    const newBalance = parseFloat(depositorBalance.accountBalance) + Number(netGained);
-    console.log('New balance calculation:', parseFloat(depositorBalance.accountBalance), '+', Number(netGained), '=', newBalance);
-    
+    // finalize depositor balance update (depositor receives 90%; 10% already distributed to stand admins)
+    const newBalance = parseFloat(depositorBalance.accountBalance) + Number(depositorAmount);
+
     const { error: depositorUpdateError } = await supabase
       .from('User')
       .update({
