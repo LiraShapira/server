@@ -5,7 +5,7 @@ import bcrypt from 'bcrypt';
 export interface AdminRow {
   id: string;
   email: string;
-  communityId: string | null;
+  communityId: number | null;
   password: string;
   isSuperAdmin: boolean;
 }
@@ -13,7 +13,7 @@ export interface AdminRow {
 export interface AdminResponse {
   id: string;
   email: string;
-  communityId: string | null;
+  communityId: number | null;
   isSuperAdmin: boolean;
 }
 
