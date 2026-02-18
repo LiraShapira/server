@@ -37,6 +37,8 @@ import { checkVerify, startVerify } from './controllers/twilio';
 import { checkDatabaseHealth } from './utils/healthCheck';
 import { getVerificationMessage } from './controllers/verificationMessages';
 import { getCommunities, getCommunityById } from './controllers/communities';
+import { login, logout, getCurrentAdmin } from './controllers/admin';
+import { authenticateAdmin } from './middleware/auth';
 
 const router = Router();
 
@@ -70,6 +72,11 @@ router.get('/health', async (req, res) => {
     });
   }
 });
+
+// ADMIN AUTHENTICATION
+router.post('/admin/login', login);
+router.post('/admin/logout', logout);
+router.get('/admin/me', authenticateAdmin, getCurrentAdmin);
 
 // COMMUNITIES
 router.get('/communities', getCommunities);
