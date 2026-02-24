@@ -157,7 +157,7 @@ export const saveDeposit = async (
 ) => {
   const netGained = parseFloat(body.compostReport.depositWeight.toString());
   const tenPercent = netGained * 0.1;
-  const depositorAmount = netGained - tenPercent; // User receives 90%; 10% goes to stand operator(s)
+  let depositorAmount = netGained - tenPercent; // User receives 90%; 10% goes to stand operator(s) (overridden to 100% if depositor is stand admin)
 
   // Fetch stand ID from database using the name
   let compostStandId: number | undefined;
@@ -229,7 +229,25 @@ export const saveDeposit = async (
       return res.status(400).json({ error: 'Organization user not found in database' });
     }
 
-    // create main transaction for depositor (org as purchaser) — amount is 90% (after 10% operator fee)
+    // Fetch stand admins to check if depositor is admin (admin depositing to own stand gets 100%, no fee)
+    const { data: stand, error: standError } = await supabase
+      .from('CompostStand')
+      .select(`
+        admins:User!User_adminCompostStandId_fkey(id, firstName, lastName)
+      `)
+      .eq('compostStandId', compostStandId)
+      .single();
+
+    if (standError) {
+      console.error('Supabase error fetching stand:', standError);
+      return res.status(400).json({ error: standError.message });
+    }
+
+    const isDepositorStandAdmin = stand?.admins?.some((a: { id: string }) => a.id === body.userId) ?? false;
+    const feeToDistribute = isDepositorStandAdmin ? 0 : tenPercent;
+    depositorAmount = netGained - feeToDistribute;
+
+    // create main transaction for depositor (org as purchaser) — amount is 90% (or 100% if depositor is stand admin)
     const mainTxnPayload: Record<string, unknown> = {
       id: randomUUID(),
       amount: depositorAmount,
@@ -277,29 +295,16 @@ export const saveDeposit = async (
       return [purchaser, recipient];
     };
 
-    // push main txn (amount is what depositor receives, i.e. 90%)
+    // push main txn (amount is what depositor receives, i.e. 90% or 100% if stand admin)
     responseTransactions.push({
       ...mainTransaction,
       users: normalizeUsers(orgUser, depositorUser),
       amount: Number(depositorAmount),
     });
 
-    // fetch stand admins
-    const { data: stand, error: standError } = await supabase
-      .from('CompostStand')
-      .select(`
-        admins:User!User_adminCompostStandId_fkey(id, firstName, lastName)
-      `)
-      .eq('compostStandId', compostStandId)
-      .single();
-
-    if (standError) {
-      console.error('Supabase error fetching stand:', standError);
-      return res.status(400).json({ error: standError.message });
-    }
-
-    if (stand?.admins?.length) {
-      const share = tenPercent / stand.admins.length;
+    // distribute 10% fee to stand admins (skipped when depositor is stand admin — they already get 100%)
+    if (stand?.admins?.length && feeToDistribute > 0) {
+      const share = feeToDistribute / stand.admins.length;
 
       for (const admin of stand.admins) {
         if (admin.id === body.userId) {
@@ -374,7 +379,7 @@ export const saveDeposit = async (
       return res.status(400).json({ error: depositorBalanceError.message });
     }
 
-    // finalize depositor balance update (depositor receives 90%; 10% already distributed to stand admins)
+    // finalize depositor balance update (depositor receives 90% or 100% if stand admin; 10% already distributed to stand admins when applicable)
     const newBalance = parseFloat(depositorBalance.accountBalance) + Number(depositorAmount);
 
     const { error: depositorUpdateError } = await supabase
