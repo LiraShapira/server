@@ -8,7 +8,8 @@ import {
   userStats,
   getUserByNumber,
   verifyUser,
-  toggleBanUser
+  toggleBanUser,
+  deleteUser
 } from './controllers/users';
 import {
   addMultipleCompostStands,
@@ -89,6 +90,7 @@ router.post('/userIdByNumber', getUserByNumber);
 router.post('/register', saveNewUser);
 router.post('/verifyUser', verifyUser);
 router.post('/toggleBanUser', toggleBanUser);
+router.post('/deleteUser', deleteUser);
 
 // COMPOST STAND OPERATIONS
 router.get('/compostStands', getCompostStands);

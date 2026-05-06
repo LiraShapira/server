@@ -469,3 +469,31 @@ export const toggleBanUser = async (
     res.status(400).json({ error: e.message });
   }
 };
+
+export const deleteUser = async (
+  req: RequestBody<{ userId: string }>,
+  res: Response
+) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('User')
+      .delete()
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Supabase error deleting user:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(200).json({ success: true });
+  } catch (e: any) {
+    console.error('Error in deleteUser:', e);
+    res.status(400).json({ error: e.message });
+  }
+};
