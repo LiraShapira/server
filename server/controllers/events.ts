@@ -232,6 +232,47 @@ export const getLocations = async (req: Request, res: Response) => {
   }
 };
 
+interface AddLocationDTO {
+  name: string;
+  communityId: string;
+}
+
+export const addLocation = async (req: RequestBody<AddLocationDTO>, res: Response) => {
+  const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+  const communityId = req.body.communityId;
+
+  if (!communityId) {
+    return res.status(400).json({ error: 'communityId is required' });
+  }
+  if (!name) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+
+  const row = {
+    id: randomUUID(),
+    name,
+    communityId,
+  };
+
+  try {
+    const { data: location, error } = await supabase
+      .from('Location')
+      .insert(row)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(201).json(location);
+  } catch (e: any) {
+    console.error('Error in addLocation:', e);
+    res.status(400).json({ error: e.message });
+  }
+};
+
 export const deleteEvent = async (req: RequestBody<{ id: string }>, res: Response) => {
   try {
     const { error } = await supabase

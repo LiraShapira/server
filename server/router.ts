@@ -33,7 +33,7 @@ import {
   updateTransaction
 } from './controllers/transactions';
 import { getAllCompostStandAdmins, removeCompostStandAdmin, addCompostStandAdmin } from './controllers/compostStandAdmins';
-import { addAttendee, addEvent, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
+import { addAttendee, addEvent, addLocation, deleteEvent, getUpcomingEvents, getLocations, getAllEvents, updateEvent, removeAttendee } from './controllers/events';
 import { checkVerify, startVerify } from './controllers/twilio';
 import { checkDatabaseHealth } from './utils/healthCheck';
 import { getVerificationMessage } from './controllers/verificationMessages';
@@ -124,6 +124,7 @@ router.get('/verificationMessage', getVerificationMessage);
 router.get('/allEvents', getAllEvents);
 router.get('/events', getUpcomingEvents);
 router.get('/locations', getLocations);
+router.post('/addLocation', addLocation);
 router.post('/addEvent', addEvent);
 router.post('/addAttendee', addAttendee);
 router.delete('/removeAttendee', removeAttendee);
