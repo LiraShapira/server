@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { phoneNumberReqObject, userReqObject } from '../../types/userTypes';
 import { supabase } from '../config/supabase';
+import { deleteUserTransactionsAndReports } from './transactions';
 import { ErrorRes } from '../../types/commonTypes';
 import {
   convertUserWithTransactionsCountToCountArray,
@@ -481,6 +482,21 @@ export const deleteUser = async (
   }
 
   try {
+    const { error: dependentsError } = await deleteUserTransactionsAndReports(userId);
+    if (dependentsError) {
+      return res.status(400).json({ error: dependentsError });
+    }
+
+    const { error: attendeeError } = await supabase
+      .from('Attendee')
+      .delete()
+      .eq('userId', userId);
+
+    if (attendeeError) {
+      console.error('Supabase error deleting attendees for user:', attendeeError);
+      return res.status(400).json({ error: attendeeError.message });
+    }
+
     const { error } = await supabase
       .from('User')
       .delete()

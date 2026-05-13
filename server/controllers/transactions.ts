@@ -871,4 +871,39 @@ export const updateTransaction = async (
     console.error('Error in updateTransaction:', e);
     res.status(400).json({ error: e.message });
   }
-}
+};
+
+/**
+ * Deletes all transactions involving this user (as purchaser or recipient), then all compost
+ * reports for this user. Call this before deleting the User row so FK constraints are satisfied.
+ *
+ * This is not a single database transaction. For one atomic operation at the DB level, define
+ * `ON DELETE CASCADE` on the relevant foreign keys or use a Postgres function / RPC.
+ *
+ * Note: Unlike {@link deleteTransaction}, this does not reverse user account balances.
+ */
+export const deleteUserTransactionsAndReports = async (
+  userId: string
+): Promise<{ error: string | null }> => {
+  const { error: txnError } = await supabase
+    .from('Transaction')
+    .delete()
+    .or(`purchaserId.eq.${userId},recipientId.eq.${userId}`);
+
+  if (txnError) {
+    console.error('Supabase error deleting transactions for user:', txnError);
+    return { error: txnError.message };
+  }
+
+  const { error: reportError } = await supabase
+    .from('CompostReport')
+    .delete()
+    .eq('userId', userId);
+
+  if (reportError) {
+    console.error('Supabase error deleting compost reports for user:', reportError);
+    return { error: reportError.message };
+  }
+
+  return { error: null };
+};
