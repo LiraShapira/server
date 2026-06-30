@@ -3,6 +3,10 @@ import { AddUsersLocalStandReqObject, CompostStandAdminsReq, CompostStandReqObje
 import { supabase } from '../config/supabase';
 import { standsIdToNameMap } from '../../constants/compostStands';
 import { months } from '../utils';
+import {
+  fetchAllCompostReportPages,
+  getDateRangeFromQuery,
+} from '../utils/compostReportQueries';
 
 type RequestBody<T> = Request<{}, {}, T>;
 
@@ -222,22 +226,30 @@ export async function setUsersLocalStand(
 export async function getCompostReports(req: Request, res: Response) {
   try {
     const communityId = req.query.communityId as string | undefined;
-    let query = supabase
-      .from('CompostReport')
-      .select(`
+    const dateRange = getDateRangeFromQuery({
+      from: req.query.from as string | undefined,
+      to: req.query.to as string | undefined,
+      period: req.query.period as string | undefined,
+    });
+
+    const select = `
         *,
         compostStand:CompostStand(*),
         user:User(*)
-      `);
-    if (communityId) {
-      query = query.eq('communityId', communityId);
-    }
-    const { data: reports, error } = await query;
+      `;
 
-    if (error) {
-      console.error('Supabase error:', error);
-      return res.status(500).json({ error: error.message });
-    }
+    const reports = await fetchAllCompostReportPages((query) => {
+      let filtered = query;
+      if (communityId) {
+        filtered = filtered.eq('communityId', communityId);
+      }
+      if (dateRange) {
+        filtered = filtered
+          .gte('date', dateRange.startDate.toISOString())
+          .lte('date', dateRange.endDate.toISOString());
+      }
+      return filtered;
+    }, select);
 
     res.status(200).send(reports);
   } catch (e: any) {
@@ -353,54 +365,63 @@ export const compostStandStats = async (req: Request, res: Response) => {
   startDate.setHours(0, 0, 0, 0);
 
   try {
-    let query = supabase
-      .from('CompostReport')
-      .select('compostStandId, depositWeight, date, userId');
+    const applyFilters = (query: ReturnType<typeof supabase.from>) => {
+      let filtered = query;
+      if (communityId) {
+        filtered = filtered.eq('communityId', communityId);
+      }
+      if (!debug && !includeOrg) {
+        filtered = filtered.neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
+      }
+      if (!debug) {
+        filtered = filtered
+          .gte('date', startDate.toISOString())
+          .lte('date', endDate.toISOString());
+      }
+      return filtered;
+    };
 
-    if (communityId) {
-      query = query.eq('communityId', communityId);
-    }
-    if (!debug && !includeOrg) {
-      query = query.neq('userId', process.env.LIRA_SHAPIRA_USER_ID || '');
-    }
-
-    const { data: reports, error } = await query;
-
-    if (error) {
-      console.error('Supabase error:', error);
-      return res.status(500).json({ error: error.message });
-    }
+    const reports = debug
+      ? await fetchAllCompostReportPages((query) => {
+          let filtered = query;
+          if (communityId) {
+            filtered = filtered.eq('communityId', communityId);
+          }
+          return filtered;
+        }, 'compostStandId, depositWeight, date, userId')
+      : await fetchAllCompostReportPages(
+          applyFilters,
+          'compostStandId, depositWeight, date, userId',
+        );
 
     if (debug) {
       const sample = (reports || []).slice(0, 5);
       return res.status(200).json({
         debug: true,
         received: { count: reports?.length || 0, sample },
-        note: 'Debug mode bypasses userId exclusion and period filtering.'
+        note: 'Debug mode bypasses userId exclusion and period filtering.',
       });
     }
 
     // Group by compostStandId and calculate stats
-    const standStats: { [key: number]: { sum: number; count: number; weights: number[] } } = {};
+    const standStats: {
+      [key: number]: { sum: number; count: number; weights: number[]; users: Set<string> };
+    } = {};
 
-    const filteredReports = (reports || []).filter((report: any) => {
-      if (!report.date) return true; // include records without date
-      const d = new Date(report.date);
-      if (Number.isNaN(d.getTime())) return true;
-      return d >= startDate && d <= endDate;
-    });
-
-    filteredReports.forEach(report => {
+    (reports || []).forEach((report: any) => {
       const standId = report.compostStandId;
       const weight = parseFloat(report.depositWeight);
-      
+
       if (!standStats[standId]) {
-        standStats[standId] = { sum: 0, count: 0, weights: [] };
+        standStats[standId] = { sum: 0, count: 0, weights: [], users: new Set() };
       }
-      
+
       standStats[standId].sum += weight;
       standStats[standId].count += 1;
       standStats[standId].weights.push(weight);
+      if (report.userId) {
+        standStats[standId].users.add(report.userId);
+      }
     });
 
     // Fetch all stands to get names
@@ -424,7 +445,8 @@ export const compostStandStats = async (req: Request, res: Response) => {
         name: standIdToNameMap[standIdNum] || standsIdToNameMap[standIdNum] || `stand_${standId}`, // Fallback to hardcoded map, then generic name
         depositWeightSum: Number(stats.sum.toFixed(2)),
         averageDepositWeight: averageWeight,
-        depositCount: stats.count
+        depositCount: stats.count,
+        depositUsersCount: stats.users.size,
       };
     }).sort((a, b) => b.depositWeightSum - a.depositWeightSum);
 
