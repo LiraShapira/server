@@ -54,6 +54,7 @@ export const convertDepositDTOToCompostReportData = (
 
     const data: any = {
         compostReportId: randomUUID(),
+        date: new Date().toISOString(),
         depositWeight: depositWeight.toString(),
         dryMatterPresent:
             dryMatter === undefined ? undefined : dryMatter ? "yes" : "no",

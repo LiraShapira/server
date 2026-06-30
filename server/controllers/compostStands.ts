@@ -347,8 +347,10 @@ export const compostStandStats = async (req: Request, res: Response) => {
   const communityId = req.query.communityId as string | undefined;
 
   const endDate = new Date();
+  endDate.setHours(23, 59, 59, 999);
   const startDate = new Date();
   startDate.setDate(endDate.getDate() - period);
+  startDate.setHours(0, 0, 0, 0);
 
   try {
     let query = supabase
@@ -384,6 +386,7 @@ export const compostStandStats = async (req: Request, res: Response) => {
     const filteredReports = (reports || []).filter((report: any) => {
       if (!report.date) return true; // include records without date
       const d = new Date(report.date);
+      if (Number.isNaN(d.getTime())) return true;
       return d >= startDate && d <= endDate;
     });
 
@@ -445,8 +448,10 @@ export const getCompostReportsStats = async (req: Request, res: Response) => {
   const communityId = req.query.communityId as string | undefined;
 
   const now = new Date();
+  now.setHours(23, 59, 59, 999);
   const from = new Date(now);
   from.setDate(now.getDate() - period);
+  from.setHours(0, 0, 0, 0);
 
   try {
     let query = supabase
