@@ -4,13 +4,15 @@ const PAGE_SIZE = 1000;
 
 type CompostReportRow = Record<string, unknown>;
 
+/** Postgrest filter builder after .select(); typed loosely to avoid Supabase generic mismatches. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CompostReportSelectQuery = any;
+
 /**
  * Fetches all matching CompostReport rows, paginating past Supabase's default 1000-row limit.
  */
 export async function fetchAllCompostReportPages(
-  applyFilters: (
-    query: ReturnType<typeof supabase.from>,
-  ) => ReturnType<typeof supabase.from>,
+  applyFilters: (query: CompostReportSelectQuery) => CompostReportSelectQuery,
   select: string,
 ): Promise<CompostReportRow[]> {
   const all: CompostReportRow[] = [];
@@ -20,7 +22,7 @@ export async function fetchAllCompostReportPages(
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    let query = supabase.from('CompostReport').select(select);
+    let query: CompostReportSelectQuery = supabase.from('CompostReport').select(select);
     query = applyFilters(query);
     const { data, error } = await query
       .order('date', { ascending: false, nullsFirst: false })
@@ -34,7 +36,7 @@ export async function fetchAllCompostReportPages(
       break;
     }
 
-    all.push(...data);
+    all.push(...(data as CompostReportRow[]));
     if (data.length < PAGE_SIZE) {
       break;
     }

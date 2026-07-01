@@ -365,7 +365,7 @@ export const compostStandStats = async (req: Request, res: Response) => {
   startDate.setHours(0, 0, 0, 0);
 
   try {
-    const applyFilters = (query: ReturnType<typeof supabase.from>) => {
+    const applyFilters = (query: any) => {
       let filtered = query;
       if (communityId) {
         filtered = filtered.eq('communityId', communityId);
