@@ -4,8 +4,8 @@ import {
   DepositDTO, HandleRequestDTO,
   TransactionDTO,
 } from '../../types/transactionTypes';
-import { convertDepositDTOToCompostReportData, findUserIdByPhoneNumber } from '../utils';
-import { standsNameToIdMap } from '../../constants/compostStands';
+import { convertDepositDTOToCompostReportData, findUserIdByPhoneNumber, resolveCompostStandId } from '../utils';
+import { fetchAllCompostReportPages } from '../utils/compostReportQueries';
 import { randomUUID } from 'crypto';
 
 type RequestBody<T> = Request<{}, {}, T>;
@@ -157,38 +157,12 @@ export const saveDeposit = async (
 ) => {
   const netGained = parseFloat(body.compostReport.depositWeight.toString());
   const tenPercent = netGained * 0.1;
-  let depositorAmount = netGained - tenPercent; // User receives 90%; 10% goes to stand operator(s) (overridden to 100% if depositor is stand admin)
-
-  // Fetch stand ID from database using the name
-  let compostStandId: number | undefined;
-  try {
-    const { data: stand, error: standLookupError } = await supabase
-      .from('CompostStand')
-      .select('compostStandId')
-      .eq('name', body.compostReport.compostStand)
-      .single();
-
-    if (standLookupError || !stand) {
-      // Fallback to hardcoded map for backward compatibility
-      compostStandId = standsNameToIdMap[body.compostReport.compostStand];
-      if (!compostStandId) {
-        return res.status(400).json({ error: `Compost stand "${body.compostReport.compostStand}" not found` });
-      }
-    } else {
-      compostStandId = stand.compostStandId;
-    }
-  } catch (e: any) {
-    // Fallback to hardcoded map for backward compatibility
-    compostStandId = standsNameToIdMap[body.compostReport.compostStand];
-    if (!compostStandId) {
-      return res.status(400).json({ error: `Compost stand "${body.compostReport.compostStand}" not found` });
-    }
-  }
+  let depositorAmount = netGained - tenPercent;
+  let createdReportId: string | null = null;
 
   try {
     const orgIdFallback = process.env.LIRA_SHAPIRA_USER_ID;
 
-    // Check if the depositor user exists and get their communityId
     const { data: depositorUserCheck, error: depositorUserCheckError } = await supabase
       .from('User')
       .select('id, communityId')
@@ -201,6 +175,17 @@ export const saveDeposit = async (
     }
 
     const depositorCommunityId = depositorUserCheck.communityId ?? null;
+
+    let compostStandId: number;
+    try {
+      compostStandId = await resolveCompostStandId(
+        body.compostReport.compostStand,
+        depositorCommunityId,
+      );
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+
     let orgIdToUse: string | null = orgIdFallback ?? null;
     if (depositorCommunityId) {
       const { data: community } = await supabase
@@ -217,7 +202,6 @@ export const saveDeposit = async (
       return res.status(400).json({ error: 'No organization user configured for this community. Set Community.orgUserId or LIRA_SHAPIRA_USER_ID.' });
     }
 
-    // Check if the organization user exists (use orgIdToUse)
     const { data: orgUserCheck, error: orgUserCheckError } = await supabase
       .from('User')
       .select('id')
@@ -229,7 +213,6 @@ export const saveDeposit = async (
       return res.status(400).json({ error: 'Organization user not found in database' });
     }
 
-    // Fetch stand admins to check if depositor is admin (admin depositing to own stand gets 100%, no fee)
     const { data: stand, error: standError } = await supabase
       .from('CompostStand')
       .select(`
@@ -247,7 +230,21 @@ export const saveDeposit = async (
     const feeToDistribute = isDepositorStandAdmin ? 0 : tenPercent;
     depositorAmount = netGained - feeToDistribute;
 
-    // create main transaction for depositor (org as purchaser) — amount is 90% (or 100% if depositor is stand admin)
+    // Create compost report first so a failed insert never leaves orphan transactions.
+    const reportData = convertDepositDTOToCompostReportData(body, compostStandId, depositorCommunityId);
+    createdReportId = reportData.compostReportId;
+    const { error: reportError } = await supabase
+      .from('CompostReport')
+      .insert(reportData);
+
+    if (reportError) {
+      createdReportId = null;
+      console.error('Supabase error creating compost report:', reportError, reportData);
+      return res.status(400).json({
+        error: `Failed to save compost report: ${reportError.message}`,
+      });
+    }
+
     const mainTxnPayload: Record<string, unknown> = {
       id: randomUUID(),
       amount: depositorAmount,
@@ -267,7 +264,7 @@ export const saveDeposit = async (
 
     if (mainTransactionError) {
       console.error('Supabase error creating main transaction:', mainTransactionError);
-      return res.status(400).json({ error: mainTransactionError.message });
+      throw new Error(mainTransactionError.message);
     }
 
     // Get users for the main transaction (include id so client can identify "other" user in list)
@@ -285,7 +282,7 @@ export const saveDeposit = async (
 
     if (orgUserError || depositorUserError) {
       console.error('Supabase error fetching users:', orgUserError || depositorUserError);
-      return res.status(400).json({ error: (orgUserError || depositorUserError)?.message });
+      throw new Error((orgUserError || depositorUserError)?.message || 'Failed to fetch users');
     }
 
     const responseTransactions: Array<any> = [];
@@ -376,7 +373,7 @@ export const saveDeposit = async (
 
     if (depositorBalanceError) {
       console.error('Supabase error fetching depositor balance:', depositorBalanceError);
-      return res.status(400).json({ error: depositorBalanceError.message });
+      throw new Error(depositorBalanceError.message);
     }
 
     // finalize depositor balance update (depositor receives 90% or 100% if stand admin; 10% already distributed to stand admins when applicable)
@@ -391,25 +388,16 @@ export const saveDeposit = async (
 
     if (depositorUpdateError) {
       console.error('Supabase error updating depositor balance:', depositorUpdateError);
-      return res.status(400).json({ error: depositorUpdateError.message });
+      throw new Error(depositorUpdateError.message);
     }
 
-    // create compost report - pass the compostStandId and communityId we already have
-    const reportData = convertDepositDTOToCompostReportData(body, compostStandId, depositorCommunityId);
-    const { error: reportError } = await supabase
-      .from('CompostReport')
-      .insert(reportData);
-
-    if (reportError) {
-      console.error('Supabase error creating compost report:', reportError);
-      return res.status(400).json({ error: reportError.message });
-    }
-
-    // respond with transactions
     console.log('Sending response transactions:', responseTransactions);
     console.log('Main transaction amount:', responseTransactions[0]?.amount, 'Type:', typeof responseTransactions[0]?.amount);
     res.status(201).send(responseTransactions);
   } catch (e: any) {
+    if (createdReportId) {
+      await supabase.from('CompostReport').delete().eq('compostReportId', createdReportId);
+    }
     console.error('Error in saveDeposit:', e);
     res.status(400).json({ error: e.message });
   }
@@ -870,6 +858,149 @@ export const updateTransaction = async (
   } catch (e: any) {
     console.error('Error in updateTransaction:', e);
     res.status(400).json({ error: e.message });
+  }
+};
+
+/**
+ * Creates missing CompostReport rows for deposit transactions that have no matching report.
+ * Matches by user + minute bucket; estimates weight from transaction amount (90% payout).
+ */
+export const backfillMissingCompostReports = async (req: Request, res: Response) => {
+  const since = (req.query.since as string) || '2026-05-25T00:00:00';
+  const communityId = req.query.communityId as string | undefined;
+  const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+
+  try {
+    const PAGE_SIZE = 1000;
+    const transactions: any[] = [];
+    let page = 0;
+
+    while (true) {
+      let query = supabase
+        .from('Transaction')
+        .select('id, amount, createdAt, recipientId, communityId, reason, category')
+        .eq('category', 'DEPOSIT')
+        .eq('reason', 'Deposit')
+        .gte('createdAt', since)
+        .order('createdAt', { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+      if (communityId) {
+        query = query.eq('communityId', communityId);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        throw error;
+      }
+      if (!data?.length) {
+        break;
+      }
+
+      transactions.push(...data);
+      if (data.length < PAGE_SIZE) {
+        break;
+      }
+      page += 1;
+    }
+
+    const reports = await fetchAllCompostReportPages((q) => {
+      let filtered = q.gte('date', since);
+      if (communityId) {
+        filtered = filtered.eq('communityId', communityId);
+      }
+      return filtered;
+    }, 'compostReportId, userId, date, compostStandId');
+
+    const reportKeys = new Set(
+      reports.map((r: any) => {
+        const t = new Date(r.date).getTime();
+        return `${r.userId}:${Math.floor(t / 60000)}`;
+      }),
+    );
+
+    const userIds = [...new Set(transactions.map((t) => t.recipientId))];
+    const { data: users } = await supabase
+      .from('User')
+      .select('id, userLocalCompostStandId, communityId')
+      .in('id', userIds);
+
+    const userById = Object.fromEntries((users || []).map((u) => [u.id, u]));
+
+    const { data: lastReports } = await supabase
+      .from('CompostReport')
+      .select('userId, compostStandId, date')
+      .in('userId', userIds)
+      .order('date', { ascending: false });
+
+    const lastStandByUser: Record<string, number> = {};
+    for (const r of lastReports || []) {
+      if (!lastStandByUser[r.userId]) {
+        lastStandByUser[r.userId] = r.compostStandId;
+      }
+    }
+
+    let created = 0;
+    let skipped = 0;
+    const samples: any[] = [];
+
+    for (const txn of transactions) {
+      const txnTime = new Date(txn.createdAt).getTime();
+      const key = `${txn.recipientId}:${Math.floor(txnTime / 60000)}`;
+      if (reportKeys.has(key)) {
+        skipped += 1;
+        continue;
+      }
+
+      const user = userById[txn.recipientId];
+      const standId = user?.userLocalCompostStandId || lastStandByUser[txn.recipientId];
+      if (!standId) {
+        skipped += 1;
+        continue;
+      }
+
+      const depositWeight = Number((Number(txn.amount) / 0.9).toFixed(2));
+      const reportRow = {
+        compostReportId: randomUUID(),
+        date: txn.createdAt,
+        depositWeight: depositWeight.toString(),
+        compostStandId: standId,
+        userId: txn.recipientId,
+        ...(txn.communityId != null
+          ? { communityId: txn.communityId }
+          : user?.communityId != null
+            ? { communityId: user.communityId }
+            : {}),
+      };
+
+      if (!dryRun) {
+        const { error } = await supabase.from('CompostReport').insert(reportRow);
+        if (error) {
+          console.error('Backfill insert failed:', error, reportRow);
+          skipped += 1;
+          continue;
+        }
+      }
+
+      reportKeys.add(key);
+      created += 1;
+      if (samples.length < 5) {
+        samples.push(reportRow);
+      }
+    }
+
+    res.status(200).json({
+      since,
+      communityId: communityId || null,
+      depositTransactions: transactions.length,
+      created,
+      skipped,
+      dryRun,
+      samples,
+    });
+  } catch (e: any) {
+    console.error('Error in backfillMissingCompostReports:', e);
+    res.status(500).json({ error: e.message });
   }
 };
 

@@ -28,13 +28,12 @@ export const convertUserWithTransactionsCountToCountArray = (userWithTransaction
 export const convertDepositDTOToCompostReportData = (
     depositDTO: DepositDTO,
     compostStandId?: number,
-    communityId?: string | null
+    communityId?: string | number | null
 ): any => {
     const { compostReport, userId } = depositDTO;
     const {
         compostStand,
         depositWeight,
-        dryMatter,
         notes,
         bugs,
         scalesProblem,
@@ -42,6 +41,9 @@ export const convertDepositDTOToCompostReportData = (
         cleanAndTidy,
         compostSmell,
     } = compostReport;
+    const dryMatter =
+        compostReport.dryMatter ??
+        (compostReport as { missingDryMatter?: boolean }).missingDryMatter;
 
     // Use provided compostStandId if available, otherwise fall back to hardcoded map
     const standId = compostStandId !== undefined
@@ -67,10 +69,37 @@ export const convertDepositDTOToCompostReportData = (
         compostStandId: standId,
         userId,
     };
-    if (communityId) {
+    if (communityId != null && communityId !== '') {
         data.communityId = communityId;
     }
     return data;
 };
+
+export async function resolveCompostStandId(
+    standName: string,
+    communityId?: string | number | null,
+): Promise<number> {
+    let query = supabase
+        .from('CompostStand')
+        .select('compostStandId')
+        .eq('name', standName);
+
+    if (communityId != null && communityId !== '') {
+        query = query.eq('communityId', communityId);
+    }
+
+    const { data: stands, error } = await query;
+
+    if (!error && stands?.length === 1) {
+        return stands[0].compostStandId;
+    }
+
+    const mapped = standsNameToIdMap[standName as keyof typeof standsNameToIdMap];
+    if (mapped !== undefined) {
+        return mapped;
+    }
+
+    throw new Error(`Compost stand "${standName}" not found`);
+}
 
 export const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
